@@ -1,4 +1,4 @@
-from sat import tableau_resynthesis
+from synthesiser import tableau_resynthesis
 
 import random
 
