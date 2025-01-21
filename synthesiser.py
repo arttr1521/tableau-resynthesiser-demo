@@ -1,4 +1,4 @@
-from pysat.solvers import Glucose3  # Assuming PySAT's Glucose3 solver is used
+from pysat.solvers import Glucose3, Minisat22  # Assuming PySAT's Glucose3 solver is used
 from bidict import bidict  # Import the bidict library
 from dataclasses import dataclass
 import networkx as nx
@@ -62,7 +62,7 @@ class tableau_resynthesis:
         # Initialize the SAT formula and solver
         self.cnf = []  # CNF formula as a list of clauses (each clause is a list of literals)
         self.assumption = [] 
-        self.solver = Glucose3()  # SAT solver instance
+        self.solver =  Minisat22()  # SAT solver instance
         self.qubitNum = len(tableau) // 2  # Number of qubits
         self.rotationNum = len(tableau[0]) if len(tableau) > 0 else 0  # Number of rotations
         self.tableau = tableau  # Store the tableau
@@ -332,10 +332,10 @@ class tableau_resynthesis:
             List[List[int]]: CNF clauses for c = a XOR b.
         """
         return [
-            [-c, -a, -b],  # Clause: ¬c ∨ ¬a ∨ b
-            [-c, a, b],  # Clause: ¬c ∨ a ∨ ¬b
-            [c, -a, b],  # Clause: c ∨ ¬a ∨ ¬b
-            [c, a, -b]     # Clause: c ∨ a ∨ b
+            [-c, -a, -b],  # Clause: ¬c ∨ ¬a ∨ ¬b
+            [-c, a, b],  # Clause: ¬c ∨ a ∨ b
+            [c, -a, b],  # Clause: c ∨ ¬a ∨ b
+            [c, a, -b]     # Clause: c ∨ a ∨ ¬b
         ]
     
     def __and_clauses(self, a, b, c):
@@ -532,18 +532,21 @@ class tableau_resynthesis:
         # Create a property variable P for the timeframe
         property_var = self.__add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
 
-        # Collect "completed" variables for all columns
-        completed_vars = [
+        # Collect the "last layer" columns from the dependency graph
+        last_layer = [col_idx for col_idx in range(self.rotationNum) if self.DG.out_degree(col_idx) == 0]
+        
+        # Collect "completed" variables for only the last layer columns
+        last_layer_completed_vars = [
             self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
-            for col_idx in range(self.rotationNum)
+            for col_idx in last_layer
         ]
 
         # Add P => (C1 ∧ C2 ∧ ... ∧ Cn)
-        for var in completed_vars:
+        for var in last_layer_completed_vars:
             self.__add_clause([-property_var, var])  # ¬P ∨ Ci
 
         # Add (C1 ∧ C2 ∧ ... ∧ Cn) => P
-        self.__add_clause([property_var] + [-var for var in completed_vars])  # P ∨ ¬C1 ∨ ¬C2 ∨ ... ∨ ¬Cn
+        self.__add_clause([property_var] + [-var for var in last_layer_completed_vars])  # P ∨ ¬C1 ∨ ¬C2 ∨ ... ∨ ¬Cn
 
         return property_var
     
