@@ -887,7 +887,7 @@ class tableau_resynthesis:
                 CX_var = self.__add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
                 operations.append(CX_var)
 
-        # Step 3: Set one-hot constraint globally for all operations
+        # Step 3: Set depth or gate count constraint
         if Is_obj_depth: self.__add_one_depth_constraint(operations)
         else: self.__add_one_hot_constraint(operations)
 
