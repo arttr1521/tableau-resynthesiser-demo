@@ -2,6 +2,7 @@ from pysat.solvers import Glucose3, Minisat22  # Assuming PySAT's Glucose3 solve
 from bidict import bidict  # Import the bidict library
 from dataclasses import dataclass
 import networkx as nx
+from itertools import combinations
 
 @dataclass(frozen=True)
 class Variable:
@@ -53,7 +54,7 @@ class Variable:
         Provides a concise representation for debugging purposes.
         Includes all attributes with non-None values.
         """
-        attrs = {key: value for key, value in self.__dict__.items() if value is not None}
+        attrs = {key: value for key, value in self.dict__.items() if value is not None}
         attrs_str = ", ".join(f"{key}={value}" for key, value in attrs.items())
         return f"Variable({attrs_str})"
 
@@ -176,7 +177,7 @@ class tableau_resynthesis:
         initial_stack = {node for node in self.DG.nodes if self.DG.in_degree(node) == 0}
         backtrack([], set(), initial_stack)
 
-    def __var2id(self, variable: Variable):
+    def var2id(self, variable: Variable):
         """
         Maps a Variable object to a SAT variable index, creating a new mapping if necessary.
 
@@ -191,7 +192,7 @@ class tableau_resynthesis:
             self.next_var_index += 1
         return self.var_bimap.inverse[variable]
 
-    def __id2var(self, id: int):
+    def id2var(self, id: int):
         """
         Extracts the Variable object from the SAT variable index.
 
@@ -205,7 +206,7 @@ class tableau_resynthesis:
             raise ValueError(f"Variable {id} not found in mapping.")
         return self.var_bimap[id]
 
-    def __add_variable(self, var_type, **kwargs):
+    def add_variable(self, var_type, **kwargs):
         """
         Creates and maps a Variable object to a SAT variable index.
 
@@ -259,9 +260,9 @@ class tableau_resynthesis:
             raise ValueError(f"Unknown variable type: {var_type}")
 
         # Map the variable to a SAT variable index
-        return self.__var2id(variable)
+        return self.var2id(variable)
     
-    def __add_clause(self, clause):
+    def add_clause(self, clause):
         """
         Adds a single clause directly to the SAT solver and stores it for debugging.
         
@@ -306,7 +307,7 @@ class tableau_resynthesis:
             )
             print(f"Clause {i + 1}: ({formatted_clause})")
     
-    def __equivalence(a, b):
+    def equivalence(a, b):
         """
         Generates CNF clauses for logical _equivalence a <=> b.
         
@@ -319,7 +320,7 @@ class tableau_resynthesis:
         """
         return [[-a, b], [-b, a]]
     
-    def __xor_clauses(self, a, b, c):
+    def xor_clauses(self, a, b, c):
         """
         Generates CNF clauses for c = a XOR b.
         
@@ -338,7 +339,7 @@ class tableau_resynthesis:
             [c, a, -b]     # Clause: c ∨ a ∨ ¬b
         ]
     
-    def __and_clauses(self, a, b, c):
+    def and_clauses(self, a, b, c):
         """
         Generates CNF clauses for A = B AND C.
         A = B AND C <=> (¬A ∨ B) ∧ (¬A ∨ C) ∧ (A ∨ ¬B ∨ ¬C).
@@ -357,7 +358,7 @@ class tableau_resynthesis:
             [a, -b, -c]    # A ∨ ¬B ∨ ¬C
         ]
     
-    def __generate_state_matrix(self, timeframe):
+    def generate_state_matrix(self, timeframe):
         """
         Generates a 2N x M state matrix for the specified timeframe.
 
@@ -373,7 +374,7 @@ class tableau_resynthesis:
             for col_idx in range(self.rotationNum):
                 axis = "Z" if row_idx < self.qubitNum else "X"
 
-                var = self.__add_variable(
+                var = self.add_variable(
                     var_type="state",
                     axis=axis,
                     qubit=row_idx if row_idx < self.qubitNum else row_idx - self.qubitNum,
@@ -390,18 +391,18 @@ class tableau_resynthesis:
         Encodes the 2N x M tableau into SAT clauses.
         """
         assert(self.current_state == None)
-        self.current_state = self.__generate_state_matrix(0)  # Generate state matrix for timeframe 0
+        self.current_state = self.generate_state_matrix(0)  # Generate state matrix for timeframe 0
 
         for row_idx, row in enumerate(self.tableau):
             for col_idx, value in enumerate(row):
                 sat_var = self.current_state[row_idx][col_idx]
                 # Add a clause representing the value in the tableau
                 if value == 1:
-                    self.__add_clause([sat_var])  # Clause: var is True
+                    self.add_clause([sat_var])  # Clause: var is True
                 else:
-                    self.__add_clause([-sat_var])  # Clause: var is False
+                    self.add_clause([-sat_var])  # Clause: var is False
 
-    def __add_one_hot_constraint(self, vars):
+    def add_one_hot_constraint(self, vars):
         """
         Adds a global one-hot constraint for a list of operation variables.
 
@@ -409,86 +410,72 @@ class tableau_resynthesis:
             vars (List[int]): List of SAT variable indices representing all operations at a given timeframe.
         """
         # At least one is true
-        self.__add_clause(vars)
+        self.add_clause(vars)
 
         # At most one is true
         for i in range(len(vars)):
             for j in range(i + 1, len(vars)):
-                self.__add_clause([-vars[i], -vars[j]])  # Pairwise negation
+                self.add_clause([-vars[i], -vars[j]])  # Pairwise negation
 
-    def __add_one_depth_constraint(self, operations):
+    def add_one_depth_constraint(self, operations, timeframe):
         """
         Adds constraints to ensure at most one operation occurs at each qubit per timeframe.
 
         Constraints:
-            - At most one operation is applied to a qubit at a time.
-            - S_i and H_i cannot both be true on the same qubit (i.e., i = i).
-            - S_i and CX_ik or CX_ki cannot both be true.
-            - H_i and CX_ik or CX_ki cannot both be true.
-            - CX_ij and CX_km cannot both be true if i = k, m or j = k, m.
+            1. At least one operation is applied.
+            2. S_i and H_i shouldn't both be true for all i.
+            3. S_i and CX_jk shouldn't both be true for either i=j or i=k.
+            4. H_i and CX_jk shouldn't both be true for either i=j or i=k.
+            5. CX_ij and CX_km shouldn't both be true if i or j is included in [k, m].
+            6. CX_ij and CX_ji cannot exist at the same time.
 
         Parameters:
             operations (List[int]): A list of variable IDs representing all operations for the timeframe.
-                                    These IDs are mapped to their respective operations using `_id2var`.
+            timeframe (int): The timeframe at which the constraint is applied.
         """
-        # Group operations by type and qubit
-        single_qubit_ops = {}  # {i: [S_var, H_var]}
-        two_qubit_ops = {}  # {(i, j): CX_var}
 
-        # Organize operations into single-qubit and two-qubit groups
-        for var_id in operations:
-            variable = self.__id2var(var_id)
-            if variable.var_type == "op":
-                if variable.op_type in {"S", "H"}:
-                    # Single-qubit operation
-                    qubit = variable.qubit
-                    if qubit not in single_qubit_ops:
-                        single_qubit_ops[qubit] = []
-                    single_qubit_ops[qubit].append(var_id)
-                elif variable.op_type == "CX":
-                    # Two-qubit operation
-                    qubit_pair = tuple(variable.qubit)
-                    two_qubit_ops[qubit_pair] = var_id
+        # Ensure at least one operation is applied
+        self.add_clause(operations)
 
-        # Add constraints for single-qubit operations
-        for qubit, op_vars in single_qubit_ops.items():
-            if len(op_vars) > 1:
-                # At most one single-qubit operation can be true for the same qubit
-                for i in range(len(op_vars)):
-                    for j in range(i + 1, len(op_vars)):
-                        self.__add_clause([-op_vars[i], -op_vars[j]])  # ¬op_vars[i] ∨ ¬op_vars[j]
+        # Constraint 2: S_i and H_i shouldn't both be true for all i
+        for qubit in range(self.qubitNum):
+            S_var = self.add_variable(var_type="op", op_type="S", qubit=qubit, timeframe=timeframe)
+            H_var = self.add_variable(var_type="op", op_type="H", qubit=qubit, timeframe=timeframe)
+            self.add_clause([-S_var, -H_var])  # ¬S_i ∨ ¬H_i
 
-        # Add constraints between single-qubit and two-qubit operations
-        for (i, j), CX_var in two_qubit_ops.items():
-            # Ensure S_i and CX_ij or CX_ji cannot both be true
-            if i in single_qubit_ops:
-                for S_var in single_qubit_ops[i]:
-                    self.__add_clause([-S_var, -CX_var])  # ¬S_i ∨ ¬CX_ij
+        # Constraints 3 & 4: S_i and H_i shouldn't both be true with CX_jk if i=j or i=k
+        for i in range(self.qubitNum):
+            for j in range(self.qubitNum):
+                if i == j: continue
+                S_i = self.add_variable(var_type="op", op_type="S", qubit=i, timeframe=timeframe)
+                S_j = self.add_variable(var_type="op", op_type="S", qubit=j, timeframe=timeframe)
+                H_i = self.add_variable(var_type="op", op_type="H", qubit=i, timeframe=timeframe)
+                H_j = self.add_variable(var_type="op", op_type="H", qubit=j, timeframe=timeframe)
+                CX_ij = self.add_variable(var_type="op", op_type="CX", qubit=[i,j], timeframe=timeframe)
+                self.add_clause([-S_i, -CX_ij])  # ¬S_i ∨ ¬CX_ij
+                self.add_clause([-S_j, -CX_ij])  # ¬S_j ∨ ¬CX_ij
+                self.add_clause([-H_i, -CX_ij])  # ¬H_i ∨ ¬CX_ij
+                self.add_clause([-H_j, -CX_ij])  # ¬H_j ∨ ¬CX_ij
 
-            if j in single_qubit_ops:
-                for S_var in single_qubit_ops[j]:
-                    self.__add_clause([-S_var, -CX_var])  # ¬S_j ∨ ¬CX_ij
+        cx_conflicts = {i: [] for i in range(self.qubitNum)}  # Track qubits involved in CX
+        for i in range(self.qubitNum):
+            for j in range(i + 1, self.qubitNum):  # Enforce CX(i, j) only for i < j
+                cx_conflicts[i].append([i, j])
+                cx_conflicts[i].append([j, i])
+                cx_conflicts[j].append([i, j])
+                cx_conflicts[j].append([j, i])
+        
+        # Constraint 5: CX_ij and CX_km shouldn't both be true if they share a or more qubit
+        for i in range(self.qubitNum):
+            cx_list = list(cx_conflicts[i])  # Get all CX gates involving qubit i
+            for idx in range(len(cx_list)):
+                CX_ij = self.add_variable(var_type="op", op_type="CX", qubit=cx_list[idx], timeframe=timeframe)
+                for jdx in range(idx + 1, len(cx_list)):  # Avoid duplicate checks
+                    CX_km = self.add_variable(var_type="op", op_type="CX", qubit=cx_list[jdx], timeframe=timeframe)
+                    self.add_clause([-CX_ij, -CX_km])  # ¬CX_ij ∨ ¬CX_km
 
-            # Ensure H_i and CX_ij or CX_ji cannot both be true
-            if i in single_qubit_ops:
-                for H_var in single_qubit_ops[i]:
-                    self.__add_clause([-H_var, -CX_var])  # ¬H_i ∨ ¬CX_ij
 
-            if j in single_qubit_ops:
-                for H_var in single_qubit_ops[j]:
-                    self.__add_clause([-H_var, -CX_var])  # ¬H_j ∨ ¬CX_ij
-
-        # Add constraints for two-qubit operations
-        for (i, j), CX_var_ij in two_qubit_ops.items():
-            for (k, m), CX_var_km in two_qubit_ops.items():
-                if (i, j) == (k, m):
-                    continue  # Skip identical operations
-
-                # Ensure CX_ij and CX_km cannot both be true if qubits overlap
-                if len({i, j} & {k, m}) > 0:  # Check qubit overlap
-                    self.__add_clause([-CX_var_ij, -CX_var_km])  # ¬CX_ij ∨ ¬CX_km
-
-    def __get_property_clauses(self, timeframe, value):
+    def get_property_clauses(self, timeframe, value):
         """
         Generates the clauses needed to encode the property for a given timeframe.
 
@@ -504,7 +491,7 @@ class tableau_resynthesis:
         """
         # Collect "completed" variables for all columns at the given timeframe
         completed_vars = [
-            self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
+            self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
             for col_idx in range(self.rotationNum)
         ]
 
@@ -515,7 +502,7 @@ class tableau_resynthesis:
             # Clauses for "at least one column is not completed": ¬(C1 ∧ C2 ∧ ... ∧ Cn) = ¬C1 ∨ ¬C2 ∨ ... ∨ ¬Cn
             return [[-var for var in completed_vars]]
     
-    def __addProperty(self, timeframe):
+    def addProperty(self, timeframe):
         """
         Adds the property variable P and its _equivalence to "all columns are completed"
         for the specified timeframe.
@@ -530,23 +517,23 @@ class tableau_resynthesis:
             int: The SAT variable representing the property P.
         """
         # Create a property variable P for the timeframe
-        property_var = self.__add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
+        property_var = self.add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
 
         # Collect the "last layer" columns from the dependency graph
         last_layer = [col_idx for col_idx in range(self.rotationNum) if self.DG.out_degree(col_idx) == 0]
         
         # Collect "completed" variables for only the last layer columns
         last_layer_completed_vars = [
-            self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
+            self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
             for col_idx in last_layer
         ]
 
         # Add P => (C1 ∧ C2 ∧ ... ∧ Cn)
         for var in last_layer_completed_vars:
-            self.__add_clause([-property_var, var])  # ¬P ∨ Ci
+            self.add_clause([-property_var, var])  # ¬P ∨ Ci
 
         # Add (C1 ∧ C2 ∧ ... ∧ Cn) => P
-        self.__add_clause([property_var] + [-var for var in last_layer_completed_vars])  # P ∨ ¬C1 ∨ ¬C2 ∨ ... ∨ ¬Cn
+        self.add_clause([property_var] + [-var for var in last_layer_completed_vars])  # P ∨ ¬C1 ∨ ¬C2 ∨ ... ∨ ¬Cn
 
         return property_var
     
@@ -562,7 +549,7 @@ class tableau_resynthesis:
             value (bool): True to assume P is true, False to assume P is false.
         """
         # Get the property variable P
-        property_var = self.__add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
+        property_var = self.add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
 
         # Assume P is true or false
         self.assumption = [property_var] if value else [-property_var]
@@ -579,13 +566,13 @@ class tableau_resynthesis:
             value (bool): True to assert P is true, False to assert P is false.
         """
         # Get the property variable P
-        property_var = self.__add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
+        property_var = self.add_variable(var_type="monitor", monitor_type="property", timeframe=timeframe)
 
         # Assert P is true or false
         if value:
-            self.__add_clause([property_var])  # Assert P is true
+            self.add_clause([property_var])  # Assert P is true
         else:
-            self.__add_clause([-property_var])  # Assert P is false
+            self.add_clause([-property_var])  # Assert P is false
 
     def solve(self, use_assumption=False):
         """
@@ -608,7 +595,7 @@ class tableau_resynthesis:
         # Return whether the formula is satisfiable
         return result
 
-    def __save_result(self, timeframe=None):
+    def save_result(self, timeframe=None):
         """
         Saves the counterexample from the SAT solver if the formula is satisfiable.
 
@@ -628,7 +615,7 @@ class tableau_resynthesis:
         counterexample = {}
         for var_id in model:
             if abs(var_id) in self.var_bimap:
-                variable = self.__id2var(abs(var_id))
+                variable = self.id2var(abs(var_id))
                 value = var_id > 0  # True if the variable is positive, False if negative
                 counterexample[self.var_bimap[abs(var_id)]] = value
 
@@ -651,13 +638,13 @@ class tableau_resynthesis:
 
         # Handle different output styles
         if style == "cex":
-            self.__print_cex()
+            self.print_cex()
         elif style == "detail":
-            self.__print_detail()
+            self.print_detail()
         else:
             print(f"Unknown style: {style}. Supported styles are 'cex' and 'detail'.")
     
-    def __print_cex(self):
+    def print_cex(self):
         """
         Prints the counterexample saved in `self.saved_result`.
         """
@@ -675,7 +662,7 @@ class tableau_resynthesis:
             attrs_str = ", ".join(f"{k}={v}" for k, v in filtered_attrs.items())
             print(f"Variable({attrs_str}): {'True' if value else 'False'}")
 
-    def __print_detail(self):
+    def print_detail(self):
         """
         Prints detailed tableau resynthesis results.
         """
@@ -686,7 +673,7 @@ class tableau_resynthesis:
             print(f"\nAt timeframe {timeframe}:")
 
             # Print the state matrix
-            state_matrix = self.__generate_state_matrix(timeframe)
+            state_matrix = self.generate_state_matrix(timeframe)
             for row in state_matrix:
                 print("[", end="")
                 print(" ".join(str(int(self.solver.get_model()[abs(var) - 1] > 0)) for var in row), end="")
@@ -695,8 +682,8 @@ class tableau_resynthesis:
             # Print validity and completion status for each column
             print("\nColumn Properties:")
             for col_idx in range(self.rotationNum):
-                valid_var = self.__add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
-                completed_var = self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
+                valid_var = self.add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
+                completed_var = self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
                 valid_status = self.solver.get_model()[abs(valid_var) - 1] > 0
                 completed_status = self.solver.get_model()[abs(completed_var) - 1] > 0
                 print(f"  Column {col_idx}: valid = {int(valid_status)}, complete = {int(completed_status)}")
@@ -708,19 +695,19 @@ class tableau_resynthesis:
             operation_found = False
             for i in range(self.qubitNum):
                 for op_type in ["S", "H"]:
-                    op_var = self.__add_variable(var_type="op", op_type=op_type, qubit=i, timeframe=timeframe)
+                    op_var = self.add_variable(var_type="op", op_type=op_type, qubit=i, timeframe=timeframe)
                     if self.solver.get_model()[abs(op_var) - 1] > 0:
                         print(f"  Apply operation: {op_type}_{i}")
                         operation_found = True
                 for j in range(self.qubitNum):
                     if i != j:
-                        cx_var = self.__add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
+                        cx_var = self.add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
                         if self.solver.get_model()[abs(cx_var) - 1] > 0:
                             print(f"  Apply operation: CX_{i}{j}")
                             operation_found = True
 
             if not operation_found:
-                print("  No operation applied.")    
+                print("  No operation applied. Something might be wrong")    
       
     def assumeRelease(self):
         """
@@ -737,10 +724,10 @@ class tableau_resynthesis:
         Parameters:
             timeframe (int): The timeframe for which monitoring is added.
         """
-        self.__addValidFlag(timeframe)  # Add validity constraints
-        self.__addCompletedFlag(timeframe)  # Add completion constraints
+        self.addValidFlag(timeframe)  # Add validity constraints
+        self.addCompletedFlag(timeframe)  # Add completion constraints
 
-    def __addValidFlag(self, timeframe):
+    def addValidFlag(self, timeframe):
         """
         Adds validity constraints for each column in the tableau at the specified timeframe.
         A column is considered valid if:
@@ -762,50 +749,50 @@ class tableau_resynthesis:
 
         for col_idx in range(self.rotationNum):
             # Create a monitor variable for this column
-            valid_col = self.__add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
+            valid_col = self.add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
 
             # Create auxiliary variables
-            ohz = self.__add_variable(var_type="aux", aux_type="ohz", col=col_idx, timeframe=timeframe)
-            alo = self.__add_variable(var_type="aux", aux_type="alo", col=col_idx, timeframe=timeframe)
-            amo = self.__add_variable(var_type="aux", aux_type="amo", col=col_idx, timeframe=timeframe)
-            axf = self.__add_variable(var_type="aux", aux_type="axf", col=col_idx, timeframe=timeframe)
+            ohz = self.add_variable(var_type="aux", aux_type="ohz", col=col_idx, timeframe=timeframe)
+            alo = self.add_variable(var_type="aux", aux_type="alo", col=col_idx, timeframe=timeframe)
+            amo = self.add_variable(var_type="aux", aux_type="amo", col=col_idx, timeframe=timeframe)
+            axf = self.add_variable(var_type="aux", aux_type="axf", col=col_idx, timeframe=timeframe)
 
             # Collect Z_i and X_i for this column
             Z_vars = [state_matrix[i][col_idx] for i in range(self.qubitNum)]  # First N rows are Z_i
             X_vars = [state_matrix[i + self.qubitNum][col_idx] for i in range(self.qubitNum)]  # Last N rows are X_i
 
             # Define at least one Z_i (alo)
-            self.__add_clause([-alo] + Z_vars)  # ¬alo ∨ Z_1 ∨ Z_2 ∨ ... ∨ Z_N
+            self.add_clause([-alo] + Z_vars)  # ¬alo ∨ Z_1 ∨ Z_2 ∨ ... ∨ Z_N
             for Z_var in Z_vars:
-                self.__add_clause([alo, -Z_var])  # alo ∨ ¬Z_i
+                self.add_clause([alo, -Z_var])  # alo ∨ ¬Z_i
 
             # Define "at most one Z_i" (amo) with pairwise constraints and exclude clauses
             for i in range(len(Z_vars)):
                 for j in range(i + 1, len(Z_vars)):
                     # ¬amo ∨ ¬Z_i ∨ ¬Z_j
-                    self.__add_clause([-amo, -Z_vars[i], -Z_vars[j]])
+                    self.add_clause([-amo, -Z_vars[i], -Z_vars[j]])
 
             for exclude_idx in range(len(Z_vars)):
                 clause = [amo]  # Start with amo
                 for include_idx in range(len(Z_vars)):
                     if include_idx != exclude_idx:
                         clause.append(Z_vars[include_idx])  # Add all other Z_vars
-                self.__add_clause(clause)
+                self.add_clause(clause)
 
             # Define all X_i are false (axf)
             for X_var in X_vars:
-                self.__add_clause([-axf, -X_var])  # ¬axf ∨ ¬X_i
-            self.__add_clause([axf] + X_vars)  # axf ∨ X_1 ∨ X_2 ∨ ... ∨ X_N
+                self.add_clause([-axf, -X_var])  # ¬axf ∨ ¬X_i
+            self.add_clause([axf] + X_vars)  # axf ∨ X_1 ∨ X_2 ∨ ... ∨ X_N
 
             # Define ohz = alo AND amo
-            for clause in self.__and_clauses(ohz, alo, amo):
-                self.__add_clause(clause)
+            for clause in self.and_clauses(ohz, alo, amo):
+                self.add_clause(clause)
 
             # Define valid_col = ohz AND axf
-            for clause in self.__and_clauses(valid_col, ohz, axf):
-                self.__add_clause(clause)
+            for clause in self.and_clauses(valid_col, ohz, axf):
+                self.add_clause(clause)
 
-    def __addCompletedFlag(self, timeframe):
+    def addCompletedFlag(self, timeframe):
         """
         Adds constraints for the "completed" flag at the specified timeframe.
         A column is considered "completed" if:
@@ -825,41 +812,41 @@ class tableau_resynthesis:
         """
         for col_idx in range(self.rotationNum):
             # Define the "completed" variable for this column at the current timeframe
-            completed_current = self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
+            completed_current = self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
 
             # Define the "valid" variable for this column at the current timeframe
-            valid_col = self.__add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
+            valid_col = self.add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
 
             # Collect dependencies of the current column from the dependency graph
             predecessors_completed = [
-                self.__add_variable(var_type="monitor", monitor_type="completed", col=dep_idx, timeframe=timeframe)
+                self.add_variable(var_type="monitor", monitor_type="completed", col=dep_idx, timeframe=timeframe)
                 for dep_idx in self.DG.predecessors(col_idx)
             ]
 
             if timeframe > 0:
                 # At t > 0, include dependency logic with completed_previous
-                completed_previous = self.__add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe - 1)
+                completed_previous = self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe - 1)
 
                 # Add dependency logic
                 # completed_current => completed_previous OR (var and valid)
                 for var in predecessors_completed:
-                    self.__add_clause([-completed_current, completed_previous, var])  # completed_current => completed_previous OR var
-                self.__add_clause([-completed_current, completed_previous, valid_col])   # completed_current => completed_previous OR valid_col
+                    self.add_clause([-completed_current, completed_previous, var])  # completed_current => completed_previous OR var
+                self.add_clause([-completed_current, completed_previous, valid_col])   # completed_current => completed_previous OR valid_col
 
                 # completed_previous OR (var and valid) => completed_current
-                self.__add_clause([completed_current, -completed_previous])
-                self.__add_clause([completed_current, -valid_col] + [-var for var in predecessors_completed])
+                self.add_clause([completed_current, -completed_previous])
+                self.add_clause([completed_current, -valid_col] + [-var for var in predecessors_completed])
             else:
                 # At t = 0, no completed_previous; depends only on predecessors_completed and valid_col
                 # completed_current => var and valid
                 for var in predecessors_completed:
-                    self.__add_clause([-completed_current, var])  # completed_current => completed_previous OR var
-                self.__add_clause([-completed_current, valid_col])   # completed_current => completed_previous OR valid_col
+                    self.add_clause([-completed_current, var])  # completed_current => completed_previous OR var
+                self.add_clause([-completed_current, valid_col])   # completed_current => completed_previous OR valid_col
 
                 # (var and valid) => completed_current
-                self.__add_clause([completed_current, -valid_col] + [-var for var in predecessors_completed])
+                self.add_clause([completed_current, -valid_col] + [-var for var in predecessors_completed])
 
-    def __addTransition(self, timeframe, Is_obj_depth = True):
+    def addTransition(self, timeframe, Is_obj_depth = True):
         """
         Adds the transition relation for the given timeframe to the SAT formula.
 
@@ -870,26 +857,26 @@ class tableau_resynthesis:
         """
         # Step 1: Reuse the current state
         current_state = self.current_state  # Reuse existing current state
-        next_state = self.__generate_state_matrix(timeframe + 1)  # Generate next state matrix for t+1
+        next_state = self.generate_state_matrix(timeframe + 1)  # Generate next state matrix for t+1
 
         # Step 2: Build operation variables at timeframe t
         operations = []
         for i in range(self.qubitNum):
             # Single-qubit operations
-            S_var = self.__add_variable(var_type="op", op_type="S", qubit=i, timeframe=timeframe)
-            H_var = self.__add_variable(var_type="op", op_type="H", qubit=i, timeframe=timeframe)
+            S_var = self.add_variable(var_type="op", op_type="S", qubit=i, timeframe=timeframe)
+            H_var = self.add_variable(var_type="op", op_type="H", qubit=i, timeframe=timeframe)
             operations.append(S_var)
             operations.append(H_var)
 
             # Two-qubit operations
             for j in range(self.qubitNum):
                 if i == j: continue
-                CX_var = self.__add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
+                CX_var = self.add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
                 operations.append(CX_var)
 
         # Step 3: Set depth or gate count constraint
-        if Is_obj_depth: self.__add_one_depth_constraint(operations)
-        else: self.__add_one_hot_constraint(operations)
+        if Is_obj_depth: self.add_one_depth_constraint(operations, timeframe)
+        else: self.add_one_hot_constraint(operations)
 
         # Step 4: Add constraints for next state variables
         for i in range(self.qubitNum):
@@ -901,50 +888,61 @@ class tableau_resynthesis:
 
 
             # Single-qubit operations
-            S_var = self.__add_variable(var_type="op", op_type="S", qubit=i, timeframe=timeframe)
-            H_var = self.__add_variable(var_type="op", op_type="H", qubit=i, timeframe=timeframe)
+            S_var = self.add_variable(var_type="op", op_type="S", qubit=i, timeframe=timeframe)
+            H_var = self.add_variable(var_type="op", op_type="H", qubit=i, timeframe=timeframe)
 
             # Z_i^{t+1} = Z_i^t ⊕ X_i^t for all columns under S_i
             for col_idx in range(self.rotationNum):
-                for clause in self.__xor_clauses(Z_i_t[col_idx], X_i_t[col_idx], Z_i_t1[col_idx]):
-                    self.__add_clause([-S_var] + clause)
+                for clause in self.xor_clauses(Z_i_t[col_idx], X_i_t[col_idx], Z_i_t1[col_idx]):
+                    self.add_clause([-S_var] + clause)
 
             # Z_i^{t+1} = X_i^t, X_i^{t+1} = Z_i^t for all columns under H_i
             for col_idx in range(self.rotationNum):
-                self.__add_clause([-H_var, Z_i_t1[col_idx], -X_i_t[col_idx]])  # ¬H_var ∨ Z_i_t+1 = X_i_t
-                self.__add_clause([-H_var, -Z_i_t1[col_idx], X_i_t[col_idx]])  # ¬H_var ∨ Z_i_t+1 = X_i_t
-                self.__add_clause([-H_var, X_i_t1[col_idx], -Z_i_t[col_idx]])  # ¬H_var ∨ X_i_t+1 = Z_i_t
-                self.__add_clause([-H_var, -X_i_t1[col_idx], Z_i_t[col_idx]])  # ¬H_var ∨ X_i_t+1 = Z_i_t
+                self.add_clause([-H_var, Z_i_t1[col_idx], -X_i_t[col_idx]])  # ¬H_var ∨ Z_i_t+1 = X_i_t
+                self.add_clause([-H_var, -Z_i_t1[col_idx], X_i_t[col_idx]])  # ¬H_var ∨ Z_i_t+1 = X_i_t
+                self.add_clause([-H_var, X_i_t1[col_idx], -Z_i_t[col_idx]])  # ¬H_var ∨ X_i_t+1 = Z_i_t
+                self.add_clause([-H_var, -X_i_t1[col_idx], Z_i_t[col_idx]])  # ¬H_var ∨ X_i_t+1 = Z_i_t
 
-            # Two-qubit operations
+            # Two-qubit operations, ctrl: i, target: j
             for j in range(self.qubitNum):
                 if i == j: continue
-                CX_var = self.__add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
+                CX_var = self.add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
 
                 # X_j^{t+1} = X_j^t ⊕ X_i^t for all columns
                 X_j_t = current_state[j + self.qubitNum]     # Current X row for qubit j
                 X_j_t1 = next_state[j + self.qubitNum]       # Next X row for qubit j
                 for col_idx in range(self.rotationNum):
-                    for clause in self.__xor_clauses(X_j_t[col_idx], X_i_t[col_idx], X_j_t1[col_idx]):
-                        self.__add_clause([-CX_var] + clause)
+                    for clause in self.xor_clauses(X_j_t[col_idx], X_i_t[col_idx], X_j_t1[col_idx]):
+                        self.add_clause([-CX_var] + clause)
 
                 # Z_i^{t+1} = Z_i^t ⊕ Z_j^t for all columns
                 Z_j_t = current_state[j]  # Current Z row for qubit j
                 for col_idx in range(self.rotationNum):
-                    for clause in self.__xor_clauses(Z_i_t[col_idx], Z_j_t[col_idx], Z_i_t1[col_idx]):
-                        self.__add_clause([-CX_var] + clause)
+                    for clause in self.xor_clauses(Z_i_t[col_idx], Z_j_t[col_idx], Z_i_t1[col_idx]):
+                        self.add_clause([-CX_var] + clause)
 
+            
             # Default: Z_i^{t+1} = Z_i^t, X_i^{t+1} = X_i^t if no operation
             for col_idx in range(self.rotationNum):
-                # Z_i^{t+1} = Z_i^t
-                self.__add_clause([S_var, H_var] + [CX_var for j in range(self.qubitNum) if i != j] + [-Z_i_t1[col_idx], Z_i_t[col_idx]])
-                self.__add_clause([S_var, H_var] + [CX_var for j in range(self.qubitNum) if i != j] + [Z_i_t1[col_idx], -Z_i_t[col_idx]])
-                
-                # X_i^{t+1} = X_i^t
-                self.__add_clause([H_var] + [CX_var for j in range(self.qubitNum) if i != j] + [-X_i_t1[col_idx], X_i_t[col_idx]])
-                self.__add_clause([H_var] + [CX_var for j in range(self.qubitNum) if i != j] + [X_i_t1[col_idx], -X_i_t[col_idx]])
+                # Collect relevant CX variables where i is the control qubit
+                relevant_target_CX_vars = [ # CXs that target at i
+                    self.add_variable(var_type="op", op_type="CX", qubit=[_ctrl, i], timeframe=timeframe)
+                    for _ctrl in range(self.qubitNum) if _ctrl != i
+                ]
+                relevant_control_CX_vars = [ # CXs that ctrl at i
+                    self.add_variable(var_type="op", op_type="CX", qubit=[i, _tgt], timeframe=timeframe)
+                    for _tgt in range(self.qubitNum) if _tgt != i
+                ]
 
-        self.current_state = next_state
+                # Z_i^{t+1} = Z_i^t
+                self.add_clause([S_var, H_var] + [CX_var for CX_var in relevant_control_CX_vars] + [-Z_i_t1[col_idx], Z_i_t[col_idx]])
+                self.add_clause([S_var, H_var] + [CX_var for CX_var in relevant_control_CX_vars] + [Z_i_t1[col_idx], -Z_i_t[col_idx]])
+
+                # X_i^{t+1} = X_i^t
+                self.add_clause([H_var] + [CX_var for CX_var in relevant_target_CX_vars] + [-X_i_t1[col_idx], X_i_t[col_idx]])
+                self.add_clause([H_var] + [CX_var for CX_var in relevant_target_CX_vars] + [X_i_t1[col_idx], -X_i_t[col_idx]])
+
+            self.current_state = next_state
 
     def setMaxDepth(self, depth: int):
         """
@@ -970,17 +968,17 @@ class tableau_resynthesis:
         # UBMC loop for all timeframes
         for i in range(self.getMaxDepth()):
             self.addMonitor(i)
-            self.__addProperty(i)  # Define P <=> (all columns completed at t=i)
+            self.addProperty(i)  # Define P <=> (all columns completed at t=i)
             self.assumeProperty(i, True)  # Assume P is true
 
             # Solve under the assumption that P is true
             if self.solve(use_assumption=True):
-                self.__save_result(i)  # Save counterexample if SAT
+                self.save_result(i)  # Save counterexample if SAT
                 return
 
             if i == self.getMaxDepth() - 1:
                 # self.assertProperty(i, True)
-                self.__save_result(i)
+                self.save_result(i)
                 return
             
             # If UNSAT, release assumptions and assert P is false
@@ -989,5 +987,40 @@ class tableau_resynthesis:
 
             # Add transitions for all timeframes except the last one
             
-            self.__addTransition(i)
+            self.addTransition(i)
+
+    def debug(self):
+        """
+        For debug
+        """
+        # Build initial state
+        self.buildInitState()
+        self.build_rotation_dependency_graph()
+
+        # UBMC loop for all timeframes
+        for i in range(self.getMaxDepth()):
+            self.addMonitor(i)
+            self.addProperty(i)  # Define P <=> (all columns completed at t=i)
+            self.assumeProperty(i, True)  # Assume P is true
+
+            # Solve under the assumption that P is true
+            if self.solve(use_assumption=True):
+                self.save_result(i)  # Save counterexample if SAT
+                return
+
+            if i == self.getMaxDepth() - 1:
+                # self.assertProperty(i, True)
+                self.save_result(i)
+                return
+            
+            # If UNSAT, release assumptions and assert P is false
+            self.assumeRelease()  # Clear assumptions
+            self.assertProperty(i, False)  # Assert P is false
+
+            # Add transitions for all timeframes except the last one
+            
+            self.addTransition(i)
+
+
+    
             
