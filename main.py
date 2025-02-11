@@ -34,7 +34,7 @@ def test_synthesiser(tableau):
     # Initialize the tableau_resynthesis object
     resynthesizer = tableau_resynthesis(tableau)
     resynthesizer.setMaxDepth(10)
-    resynthesizer.UBMC()
+    resynthesizer.debug()
 
     resynthesizer.print_graph()
 
@@ -57,15 +57,16 @@ if __name__ == "__main__":
     
     # # Define a simple tableau for testing
     # tableau = [
-    #     [0, 1, 0, 1],  # Z part for qubit 1
-    #     [0, 0, 1, 1],  # Z part for qubit 2
-    #     [0, 0, 0, 0],  # X part for qubit 1
-    #     [1, 0, 0, 0]   # X part for qubit 2
+    #     [1, 0, 0, 1],
+    #     [1, 0, 1, 0],
+    #     [1, 1, 0, 0],
+    #     [0, 1, 0, 1]
     # ]
     
     # Define a random tableau for testing
-    tableau = generate_random_tableau(2, 3, seed=24)
-    print("Input tableau is: ")
-    print(tableau)
+    tableau = generate_random_tableau(4, 4, seed=25)
+    # print("Input tableau is: ")
+    # for row in tableau:
+    #     print(row)
 
     test_synthesiser(tableau)
