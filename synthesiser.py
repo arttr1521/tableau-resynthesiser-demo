@@ -989,37 +989,6 @@ class tableau_resynthesis:
             
             self.addTransition(i)
 
-    def debug(self):
-        """
-        For debug
-        """
-        # Build initial state
-        self.buildInitState()
-        self.build_rotation_dependency_graph()
-
-        # UBMC loop for all timeframes
-        for i in range(self.getMaxDepth()):
-            self.addMonitor(i)
-            self.addProperty(i)  # Define P <=> (all columns completed at t=i)
-            self.assumeProperty(i, True)  # Assume P is true
-
-            # Solve under the assumption that P is true
-            if self.solve(use_assumption=True):
-                self.save_result(i)  # Save counterexample if SAT
-                return
-
-            if i == self.getMaxDepth() - 1:
-                # self.assertProperty(i, True)
-                self.save_result(i)
-                return
-            
-            # If UNSAT, release assumptions and assert P is false
-            self.assumeRelease()  # Clear assumptions
-            self.assertProperty(i, False)  # Assert P is false
-
-            # Add transitions for all timeframes except the last one
-            
-            self.addTransition(i)
 
 
     

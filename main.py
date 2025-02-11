@@ -34,7 +34,7 @@ def test_synthesiser(tableau):
     # Initialize the tableau_resynthesis object
     resynthesizer = tableau_resynthesis(tableau)
     resynthesizer.setMaxDepth(10)
-    resynthesizer.debug()
+    resynthesizer.UBMC()
 
     resynthesizer.print_graph()
 
