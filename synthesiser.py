@@ -2,7 +2,7 @@ from pysat.solvers import Glucose3, Minisat22  # Assuming PySAT's Glucose3 solve
 from bidict import bidict  # Import the bidict library
 from dataclasses import dataclass
 import networkx as nx
-from itertools import combinations
+import time
 
 @dataclass(frozen=True)
 class Variable:
@@ -504,11 +504,11 @@ class tableau_resynthesis:
     
     def addProperty(self, timeframe):
         """
-        Adds the property variable P and its _equivalence to "all columns are completed"
+        Adds the property variable P and its _equivalence to "all columes of the last layer are completed"
         for the specified timeframe.
 
         Property:
-            P <=> (C1 ∧ C2 ∧ ... ∧ Cn)
+            P <=> (C_i1 ∧ C_i2 ∧ ... ∧ C_in)
 
         Parameters:
             timeframe (int): The current timeframe.
@@ -999,14 +999,23 @@ class tableau_resynthesis:
 
         # UBMC loop for all timeframes
         for i in range(self.getMaxDepth()):
+            start_time = time.time()  # Start timing for this timeframe
+            
             self.addMonitor(i)
             self.addProperty(i)  # Define P <=> (all columns completed at t=i)
             self.assumeProperty(i, True)  # Assume P is true
 
             # Solve under the assumption that P is true
             if self.solve(use_assumption=True):
+                end_time = time.time()  # End timing
+                elapsed_time = end_time - start_time
+                print(f"✅ Solution found at timeframe {i}. Time taken: {elapsed_time:.4f} seconds.")
                 self.save_result(i)  # Save counterexample if SAT
                 return
+
+            end_time = time.time()  # End timing
+            elapsed_time = end_time - start_time
+            print(f"⏳ Timeframe {i} completed, no solution found. Time taken: {elapsed_time:.4f} seconds.")
 
             if i == self.getMaxDepth() - 1:
                 # self.assertProperty(i, True)
