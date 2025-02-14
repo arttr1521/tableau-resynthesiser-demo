@@ -221,6 +221,22 @@ class tableau_resynthesis:
             raise ValueError(f"Variable {id} not found in mapping.")
         return self.var_bimap[id]
 
+    def get_all_op_ids(self):
+        """
+        Retrieves all SAT variable IDs corresponding to operation variables.
+        
+        Returns:
+            List[int]: A list of SAT variable IDs for all operation variables.
+        """
+        op_ids = []
+
+        # Iterate over the bidirectional variable map
+        for var_id, variable in self.var_bimap.items():
+            if isinstance(variable, Variable) and variable.var_type == "op":
+                op_ids.append(var_id)
+
+        return op_ids    
+    
     def add_variable(self, var_type, **kwargs):
         """
         Creates and maps a Variable object to a SAT variable index.
@@ -277,7 +293,6 @@ class tableau_resynthesis:
         # Map the variable to a SAT variable index
         return self.var2id(variable, var_type)
     
-    
     def add_clause(self, clause, type):
         """
         Adds a single clause directly to the SAT solver and stores it for debugging.
@@ -290,8 +305,7 @@ class tableau_resynthesis:
             self.cnf = []
         self.cnf.append(clause)
         self.clause_counter[type] += 1
-
-    
+ 
     def print_variables(self):
         """
         Prints all SAT variables and their corresponding Variable objects for debugging.
@@ -512,7 +526,6 @@ class tableau_resynthesis:
                     CX_km = self.add_variable(var_type="op", op_type="CX", qubit=cx_list[jdx], timeframe=timeframe)
                     self.add_clause([-CX_ij, -CX_km], "gate_constraint")  # ¬CX_ij ∨ ¬CX_km
 
-
     def get_property_clauses(self, timeframe, value):
         """
         Generates the clauses needed to encode the property for a given timeframe.
@@ -612,6 +625,20 @@ class tableau_resynthesis:
         else:
             self.add_clause([-property_var], "monitor")  # Assert P is false
 
+    def set_phases(self, var_ids, value=False):
+        """
+        Sets the preferred polarity (phases) of SAT variables before solving.
+
+        Parameters:
+            var_ids (List[int]): List of SAT variable IDs to set phases for.
+            value (bool): If True, set phases to positive values (prefer True).
+                        If False, set phases to negative values (prefer False).
+        """
+        if value:
+            self.solver.set_phases(var_ids)  # Set all variables to prefer True
+        else:
+            self.solver.set_phases([-var_id for var_id in var_ids])  # Set all variables to prefer False
+    
     def solve(self, use_assumption=False):
         """
         Solves the SAT formula with an optional flag to use `self.assumption`.
@@ -647,7 +674,7 @@ class tableau_resynthesis:
 
         # Extract the model from the solver
         model = self.solver.get_model()
-        self.setMaxDepth(timeframe)
+        if timeframe: self.setMaxDepth(timeframe)
 
         # Decode the model into human-readable format
         counterexample = {}
@@ -994,42 +1021,39 @@ class tableau_resynthesis:
         """
         return self.MaxDepth
 
-    def UBMC(self):
+    def BMC(self, t):
         """
-        Unbounded Model Checking (UBMC) for tableau resynthesis.
-        Handles all timeframes, including t=0, within the loop.
+        Bounded Model Checking (BMC) for tableau resynthesis.
+        Directly builds and solves the model at a fixed t.
         """
         # Build initial state
         self.buildInitState()
         self.build_rotation_dependency_graph()
 
-        # UBMC loop for all timeframes
-        for i in range(self.getMaxDepth()):
+
+        # Build BMC at timeframe t
+        for i in range(t):    
             self.addMonitor(i)
-            self.addProperty(i)  # Define P <=> (all columns completed at t=i)
-            self.assumeProperty(i, True)  # Assume P is true
-
-            # Solve under the assumption that P is true
-            if self.solve(use_assumption=True):
-                self.save_result(i)  # Save counterexample if SAT
-                return
-
-            if i == self.getMaxDepth() - 1:
-                # self.assertProperty(i, True)
-                self.save_result(i)
-                return
-            
-            # If UNSAT, release assumptions and assert P is false
-            self.assumeRelease()  # Clear assumptions
-            self.assertProperty(i, False)  # Assert P is false
-
-            # Add transitions for all timeframes except the last one
-            
             self.addTransition(i)
-
-    def debug(self):
+    
+        self.addMonitor(t)
+        self.addProperty(t)  # Define P <=> (all columns completed at t=i)
+        self.assertProperty(t, True)
+        
+        op_ids = self.get_all_op_ids()
+        self.set_phases(op_ids, False)
+        
+        if self.solve():
+            print("BMC sucessful at timeframe %i." %t)
+            self.save_result(t)
+            return
+        
+        print("BMC fails at timeframe %i." %t)
+    
+    def UBMC(self):
         """
-        For debug
+        Unbounded Model Checking (UBMC) for tableau resynthesis.
+        Handles all timeframes, including t=0, within the loop.
         """
         # Build initial state
         self.buildInitState()
