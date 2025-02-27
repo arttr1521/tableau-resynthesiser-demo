@@ -339,6 +339,36 @@ class tableau_resynthesis:
             )
             print(f"Clause {i + 1}: ({formatted_clause})")
     
+    def save_cnf_to_file(self, filename = 'out.cnf'):
+        """
+        Saves the CNF formula (self.cnf) into a DIMACS CNF file.
+
+        Parameters:
+            filename (str): The file path to save the CNF formula.
+        """
+        # Ensure that CNF clauses exist
+        if not hasattr(self, 'cnf') or not self.cnf:
+            print("No CNF formula available to save.")
+            return
+        
+        num_variables = self.next_var_index - 1  # Variables are indexed from 1
+        num_clauses = len(self.cnf)
+
+        try:
+            with open(filename, "w") as f:
+                # Write the problem line in DIMACS format
+                f.write(f"p cnf {num_variables} {num_clauses}\n")
+
+                # Write each clause
+                for clause in self.cnf:
+                    clause_str = " ".join(map(str, clause)) + " 0\n"
+                    f.write(clause_str)
+
+            print(f"CNF formula successfully saved to {filename}.")
+        
+        except Exception as e:
+            print(f"Error saving CNF file: {e}")
+    
     def print_statistics(self):
         """
         Prints the statistics of variables and clauses added to the solver.
@@ -1039,6 +1069,12 @@ class tableau_resynthesis:
         self.addMonitor(t)
         self.addProperty(t)  # Define P <=> (all columns completed at t=i)
         self.assertProperty(t, True)
+
+        # Debug
+        # self.save_cnf_to_file()
+        self.print_graph()
+        self.print_statistics()
+        self.print_clauses(detail=True)
         
         op_ids = self.get_all_op_ids()
         self.set_phases(op_ids, False)

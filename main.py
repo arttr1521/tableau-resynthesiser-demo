@@ -60,19 +60,21 @@ def test_synthesiser(tableau):
     resynthesizer.print_result(style="cex")
     resynthesizer.print_result(style="detail")
 
+
+
 # Call the test function
 if __name__ == "__main__":
     
     # # Define a simple tableau for testing
-    tableau = [
-        [1, 0, 0, 1],
-        [1, 0, 1, 0],
-        [1, 1, 0, 0],
-        [0, 1, 0, 1]
-    ]
+    # tableau = [
+    #     [1, 0, 0, 1],
+    #     [1, 0, 1, 0],
+    #     [1, 1, 0, 0],
+    #     [0, 1, 0, 1]
+    # ]
     
     # Define a random tableau for testing
-    # tableau = generate_random_tableau(4, 6, seed=25)
+    tableau = generate_random_tableau(4, 6, seed=25)
 
     print("Input tableau is: ")
     for row in tableau:
