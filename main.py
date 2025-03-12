@@ -41,8 +41,8 @@ def test_synthesiser(tableau):
 
     # Initialize the tableau_resynthesis object
     resynthesizer = tableau_resynthesis(tableau)
-    # resynthesizer.setMaxDepth(10)
-    resynthesizer.BMC(7)
+    resynthesizer.setMaxDepth(8)
+    resynthesizer.UBMC()
 
     resynthesizer.print_graph()
 
@@ -55,8 +55,8 @@ def test_synthesiser(tableau):
     resynthesizer.print_clauses(detail=True)
 
 
-    # If BMC succeeds, print success message
-    print("\nBMC completed successfully.")
+    # If UBMC succeeds, print success message
+    print("\nUBMC completed successfully.")
     resynthesizer.print_result(style="cex")
     resynthesizer.print_result(style="detail")
 
@@ -69,6 +69,8 @@ if __name__ == "__main__":
     # tableau = [
     #     [1, 0, 0, 1],
     #     [1, 0, 1, 0],
+    #     [1, 1, 0, 0],
+    #     [1, 1, 0, 0],
     #     [1, 1, 0, 0],
     #     [0, 1, 0, 1]
     # ]

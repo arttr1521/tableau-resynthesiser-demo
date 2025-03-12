@@ -28,7 +28,10 @@ class Variable:
             else:
                 return f"M^{self.timeframe}_{{{self.qubit},{self.col}}}"
         elif self.var_type == "aux":
-            return f"{self.aux_type}^{self.timeframe}_{self.col}"
+            if self.aux_type != "seq":
+                return f"{self.aux_type}^{self.timeframe}_{self.col}"
+            else:
+                return f"{self.aux_type}^{self.timeframe}_{{{self.qubit},{self.col}}}"
         elif self.var_type == "monitor":
             if self.monitor_type == "completed":
                 return f"completed^{self.timeframe}_{self.col}"
@@ -285,7 +288,8 @@ class tableau_resynthesis:
                 var_type=var_type,
                 aux_type=kwargs.get("aux_type"),
                 col=kwargs.get("col"),
-                timeframe=kwargs.get("timeframe")
+                timeframe=kwargs.get("timeframe"),
+                qubit=qubit
             )
         else:
             raise ValueError(f"Unknown variable type: {var_type}")
@@ -862,17 +866,41 @@ class tableau_resynthesis:
                 self.add_clause([alo, -Z_var], "monitor")  # alo ∨ ¬Z_i
 
             # Define "at most one Z_i" (amo) with pairwise constraints and exclude clauses
-            for i in range(len(Z_vars)):
-                for j in range(i + 1, len(Z_vars)):
-                    # ¬amo ∨ ¬Z_i ∨ ¬Z_j
-                    self.add_clause([-amo, -Z_vars[i], -Z_vars[j]], "monitor")
+            # for i in range(len(Z_vars)):
+            #     for j in range(i + 1, len(Z_vars)):
+            #         # ¬amo ∨ ¬Z_i ∨ ¬Z_j
+            #         self.add_clause([-amo, -Z_vars[i], -Z_vars[j]], "monitor")
 
-            for exclude_idx in range(len(Z_vars)):
-                clause = [amo]  # Start with amo
-                for include_idx in range(len(Z_vars)):
-                    if include_idx != exclude_idx:
-                        clause.append(Z_vars[include_idx])  # Add all other Z_vars
-                self.add_clause(clause, "monitor")
+            # Sequential encoding: introduce auxiliary variables seq_1, seq_2, ..., seq_{n-1}
+            if len(Z_vars) > 1:
+                Seq_vars = [self.add_variable(var_type="aux", aux_type="seq", col=col_idx, timeframe=timeframe, qubit=i) for i in range(len(Z_vars) - 1)]
+                # Create the violation indicator variable E (for AMO)
+                E = self.add_variable(var_type="aux", aux_type="E", col=col_idx, timeframe=timeframe)
+                
+                # Sequential encoding clauses:
+                # 1. For the first Z: if Z_vars[0] is true, then seq_vars[0] must be true.
+                self.add_clause([-Z_vars[0], Seq_vars[0]], "monitor")
+                
+                # 2. For i = 1,..., n_z-1:
+                #    If Z_vars[i] is true and a true has already been propagated (seq_vars[i-1] is true),
+                #    then a violation occurs; we capture this with variable E.
+                #    Clause: (¬Z_vars[i] ∨ ¬seq_vars[i-1] ∨ E)
+                for i in range(1, len(Z_vars)):
+                    self.add_clause([-Z_vars[i], -Seq_vars[i-1], E], "monitor")
+                
+                # 3. Propagate the sequential flag:
+                #    If the previous sequential variable is false, then the next one must be false.
+                #    Clause: (¬seq_vars[i-1] ∨ seq_vars[i])
+                for i in range(1, len(Z_vars) - 1):
+                    self.add_clause([-Seq_vars[i-1], Seq_vars[i]], "monitor")
+                
+                # Reification: Set amo to reflect whether the AMO constraint holds.
+                # If no violation occurs (E is false), then amo should be true; otherwise, amo is false.
+                # We encode: amo ↔ ¬E, which is equivalent to:
+                #   Clause: (amo ∨ E)  and  Clause: (¬amo ∨ ¬E)
+                self.add_clause([amo, E], "monitor")       # (amo or E)
+                self.add_clause([-amo, -E], "monitor")       # (not amo or not E)
+
 
             # Define all X_i are false (axf)
             for X_var in X_vars:
@@ -1072,9 +1100,9 @@ class tableau_resynthesis:
 
         # Debug
         # self.save_cnf_to_file()
-        self.print_graph()
-        self.print_statistics()
-        self.print_clauses(detail=True)
+        # self.print_graph()
+        # self.print_statistics()
+        # self.print_clauses(detail=True)
         
         op_ids = self.get_all_op_ids()
         self.set_phases(op_ids, False)
