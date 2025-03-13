@@ -1,4 +1,6 @@
-from pysat.solvers import Glucose3, Minisat22  # Assuming PySAT's Glucose3 solver is used
+from pysat.solvers import Glucose3, Minisat22
+from pysat.examples.rc2 import RC2
+from pysat.formula import WCNF
 from bidict import bidict  # Import the bidict library
 from dataclasses import dataclass
 import networkx as nx
@@ -70,6 +72,8 @@ class tableau_resynthesis:
         self.current_state = None  # Cache for the current state matrix
         self.MaxDepth = 1000  # Maximum depth for unbounded model checking
         self.DG = nx.DiGraph()
+        self.result = None # Phase 1 result
+        self.result_p2 = None # Phase 2 result
 
         # Use bidirectional mapping for variables
         self.var_bimap = bidict()  # Maps variable indices to Variable objects and vice versa
@@ -338,6 +342,32 @@ class tableau_resynthesis:
                 for lit in clause
             )
             print(f"Clause {i + 1}: ({formatted_clause})")
+    
+    def print_wcnf(self):
+        """
+        Prints the WCNF formula stored in self.wcnf.
+        It lists the number of variables, hard clauses, and soft clauses with their weights.
+        """
+        if not hasattr(self, 'wcnf') or not self.wcnf:
+            print("No WCNF formula available.")
+            return
+
+        print("=== WCNF Formula ===")
+        print("Number of variables:", self.wcnf.nv)
+        
+        print("\nHard Clauses:")
+        if hasattr(self.wcnf, 'hard') and self.wcnf.hard:
+            for i, clause in enumerate(self.wcnf.hard):
+                print(f"Clause {i+1}: {clause}")
+        else:
+            print("No hard clauses available.")
+        
+        print("\nSoft Clauses:")
+        if hasattr(self.wcnf, 'soft') and self.wcnf.soft:
+            for i, (clause, weight) in enumerate(zip(self.wcnf.soft, self.wcnf.wght)):
+                print(f"Clause {i+1}: {clause} with weight {weight}")
+        else:
+            print("No soft clauses available.")
     
     def save_cnf_to_file(self, filename = 'out.cnf'):
         """
@@ -699,7 +729,7 @@ class tableau_resynthesis:
         """
         # Check if the formula is satisfiable
         if not self.solver.get_model():
-            self.saved_result = None  # Clear any previously saved results
+            self.result = None  # Clear any previously saved results
             return
 
         # Extract the model from the solver
@@ -715,7 +745,7 @@ class tableau_resynthesis:
                 counterexample[self.var_bimap[abs(var_id)]] = value
 
         # Save the counterexample for later use
-        self.saved_result = {"timeframe": timeframe, "counterexample": counterexample}
+        self.result = {"timeframe": timeframe, "counterexample": counterexample}
     
     def print_result(self, style="detail"):
         """
@@ -723,7 +753,7 @@ class tableau_resynthesis:
 
         Parameters:
             style (str): The style of the output. Options are:
-                - "cex": Prints the counterexample saved in `self.saved_result`.
+                - "cex": Prints the counterexample saved in `self.result`.
                 - "detail": Prints detailed tableau resynthesis results.
         """
         # Check if the SAT problem is unsatisfiable
@@ -741,14 +771,14 @@ class tableau_resynthesis:
     
     def print_cex(self):
         """
-        Prints the counterexample saved in `self.saved_result`.
+        Prints the counterexample saved in `self.result`.
         """
-        if not self.saved_result or not self.saved_result.get("counterexample"):
+        if not self.result or not self.result.get("counterexample"):
             print("No counterexample found.")
             return
 
-        timeframe = self.saved_result["timeframe"]
-        counterexample = self.saved_result["counterexample"]
+        timeframe = self.result["timeframe"]
+        counterexample = self.result["counterexample"]
 
         print(f"Counterexample Found at Timeframe {timeframe}:")
         for variable, value in counterexample.items():
@@ -757,7 +787,70 @@ class tableau_resynthesis:
             attrs_str = ", ".join(f"{k}={v}" for k, v in filtered_attrs.items())
             print(f"Variable({attrs_str}): {'True' if value else 'False'}")
 
-    def print_detail(self):
+    def print_detail(self, solver="sat"):
+        """
+        Prints detailed tableau resynthesis results.
+        
+        Parameters:
+            solver (str): Specifies which solver result to use.
+                - "sat": Use the SAT solver's model.
+                - "maxsat": Use the MaxSAT solver's model stored in self.result_p2.
+        """
+        # Select model based on the solver flag
+        if solver == "sat":
+            model = self.solver.get_model()
+        elif solver == "maxsat":
+            if not hasattr(self, 'result_p2') or not self.result_p2 or "model" not in self.result_p2:
+                print("No MaxSAT result available.")
+                return
+            model = self.result_p2["model"]
+        else:
+            print(f"Unknown solver flag: {solver}. Supported flags are 'sat' and 'maxsat'.")
+            return
+
+        print("=== Tableau Resynthesis Results ===")
+        
+        # Iterate through timeframes
+        for timeframe in range(self.getMaxDepth() + 1):
+            print(f"\nAt timeframe {timeframe}:")
+            # Print the state matrix
+            state_matrix = self.generate_state_matrix(timeframe)
+            for row in state_matrix:
+                print("[", end="")
+                print(" ".join(str(int(model[abs(var) - 1] > 0)) for var in row), end="")
+                print("]")
+            
+            # Print validity and completion status for each column
+            print("\nColumn Properties:")
+            for col_idx in range(self.rotationNum):
+                valid_var = self.add_variable(var_type="monitor", monitor_type="valid", col=col_idx, timeframe=timeframe)
+                completed_var = self.add_variable(var_type="monitor", monitor_type="completed", col=col_idx, timeframe=timeframe)
+                valid_status = model[abs(valid_var) - 1] > 0
+                completed_status = model[abs(completed_var) - 1] > 0
+                print(f"  Column {col_idx}: valid = {int(valid_status)}, complete = {int(completed_status)}")
+            
+            if timeframe == self.getMaxDepth(): break
+            
+            # Identify the operation applied
+            print("\nOperation Applied:")
+            operation_found = False
+            for i in range(self.qubitNum):
+                for op_type in ["S", "H"]:
+                    op_var = self.add_variable(var_type="op", op_type=op_type, qubit=i, timeframe=timeframe)
+                    if model[abs(op_var) - 1] > 0:
+                        print(f"  Apply operation: {op_type}_{i}")
+                        operation_found = True
+                for j in range(self.qubitNum):
+                    if i != j:
+                        cx_var = self.add_variable(var_type="op", op_type="CX", qubit=[i, j], timeframe=timeframe)
+                        if model[abs(cx_var) - 1] > 0:
+                            print(f"  Apply operation: CX_{i}{j}")
+                            operation_found = True
+
+            if not operation_found:
+                print("  No operation applied. Something might be wrong")
+    
+    def __print_detail(self):
         """
         Prints detailed tableau resynthesis results.
         """
@@ -1111,6 +1204,7 @@ class tableau_resynthesis:
                 end_time = time.time()  # End timing
                 elapsed_time = end_time - start_time
                 print(f"✅ Solution found at timeframe {i}. Time taken: {elapsed_time:.4f} seconds.")
+                self.assertProperty(i, True)
                 self.save_result(i)  # Save counterexample if SAT
                 return
 
@@ -1119,7 +1213,7 @@ class tableau_resynthesis:
             print(f"⏳ Timeframe {i} completed, no solution found. Time taken: {elapsed_time:.4f} seconds.")
 
             if i == self.getMaxDepth() - 1:
-                # self.assertProperty(i, True)
+                self.assertProperty(i, True)
                 self.save_result(i)
                 return
             
@@ -1131,6 +1225,66 @@ class tableau_resynthesis:
             
             self.addTransition(i)
 
+    def optimize_result(self):
+        """
+        Optimizes the result by minimizing the number of operation variables set to True.
+        This is achieved by:
+          1. Adding all clauses from self.cnf into a WCNF as hard clauses.
+          2. Adding all operation variables as soft clauses, each penalizing the variable being True.
+             (Uses get_all_op_ids to retrieve operation variable IDs.)
+          3. Solving the resulting MaxSAT problem using RC2 and saving the result in self.result_p2.
+        """
+        # Create a weighted CNF formula
+        self.wcnf = WCNF()
+        
+        # Add all hard clauses from the current CNF
+        for clause in self.cnf:
+            self.wcnf.append(clause)
+        
+        # Retrieve all operation variable IDs (using get_all_op_ids)
+        op_ids = self.get_all_op_ids()
+        
+        # For each operation variable, add a soft clause that prefers it to be False (minimize op count)
+        for op_id in op_ids:
+            self.wcnf.append([-op_id], weight=1)
+        
+        # Solve the MaxSAT problem using RC2
+        start_time = time.time()
+        with RC2(self.wcnf) as rc2:
+            model = rc2.compute()
+            # Save the result into self.result_p2 along with the cost (total weight of unsatisfied soft clauses)
+            self.result_p2 = {
+                "model": model,
+                "cost": rc2.cost
+            }
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"MaxSAT solver took {elapsed_time:.4f} seconds.")
 
+    def print_optimize_result(self):
+        """
+        Prints the optimized result (Phase 2) stored in self.result_p2.
+        This includes the optimal cost and the corresponding assignment.
+        """
+        if not hasattr(self, 'result_p2') or not self.result_p2:
+            print("No optimized result available.")
+            return
+
+        model = self.result_p2.get("model")
+        cost = self.result_p2.get("cost")
+
+        print("=== Optimized Result (Phase 2) ===")
+        print("Optimal cost (total weight of unsatisfied soft clauses):", cost)
+        if model:
+            print("Optimal assignment:")
+            for var in model:
+                # Check if the variable exists in the bidirectional map
+                if abs(var) in self.var_bimap:
+                    variable = self.var_bimap[abs(var)]
+                    print(f"{variable}: {'True' if var > 0 else 'False'}")
+                else:
+                    print(f"Variable {var}")
+        else:
+            print("No model found.")
     
             
