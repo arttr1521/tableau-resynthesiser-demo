@@ -6,6 +6,8 @@ def generate_random_tableau(num_qubits, num_rotations, seed=None):
     """
     Generates a random tableau for testing with an optional fixed random seed,
     ensuring that no column is entirely zero.
+    Generates a random tableau for testing with an optional fixed random seed,
+    ensuring that no column is entirely zero.
 
     Parameters:
         num_qubits (int): The number of qubits (N).
@@ -18,11 +20,19 @@ def generate_random_tableau(num_qubits, num_rotations, seed=None):
     if seed is not None:
         random.seed(seed)  # Set the random seed for reproducibility
 
+
     rows = 2 * num_qubits  # Tableau has 2N rows
     cols = num_rotations   # Tableau has M columns
 
     # Generate a 2N x M tableau with random 0s and 1s
     tableau = [[random.randint(0, 1) for _ in range(cols)] for _ in range(rows)]
+
+    # Ensure that no column is all zeros
+    for col in range(cols):
+        if all(tableau[row][col] == 0 for row in range(rows)):  
+            # Pick a random row and set it to 1
+            random_row = random.randint(0, rows - 1)
+            tableau[random_row][col] = 1
 
     # Ensure that no column is all zeros
     for col in range(cols):
@@ -47,17 +57,17 @@ def test_synthesiser(tableau):
     resynthesizer.print_graph()
 
     # Print variables for debugging
-    print("\nGenerated Variables:")
-    resynthesizer.print_variables()
+    # print("\nGenerated Variables:")
+    # resynthesizer.print_variables()
 
     # Print the CNF clauses for debugging
-    print("\nGenerated CNF Clauses:")
-    resynthesizer.print_clauses(detail=True)
+    # print("\nGenerated CNF Clauses:")
+    # resynthesizer.print_clauses(detail=True)
 
 
-    # If UBMC succeeds, print success message
-    print("\nUBMC completed successfully.")
-    resynthesizer.print_result(style="cex")
+    # If BMC succeeds, print success message
+    # print("\nBMC completed successfully.")
+    # resynthesizer.print_result(style="cex")
     resynthesizer.print_result(style="detail")
 
 
