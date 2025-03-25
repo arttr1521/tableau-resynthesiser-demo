@@ -4,7 +4,8 @@ import random
 
 def generate_random_tableau(num_qubits, num_rotations, seed=None):
     """
-    Generates a random tableau for testing with an optional fixed random seed.
+    Generates a random tableau for testing with an optional fixed random seed,
+    ensuring that no column is entirely zero.
 
     Parameters:
         num_qubits (int): The number of qubits (N).
@@ -16,14 +17,21 @@ def generate_random_tableau(num_qubits, num_rotations, seed=None):
     """
     if seed is not None:
         random.seed(seed)  # Set the random seed for reproducibility
+
     rows = 2 * num_qubits  # Tableau has 2N rows
     cols = num_rotations   # Tableau has M columns
 
     # Generate a 2N x M tableau with random 0s and 1s
     tableau = [[random.randint(0, 1) for _ in range(cols)] for _ in range(rows)]
 
-    return tableau
+    # Ensure that no column is all zeros
+    for col in range(cols):
+        if all(tableau[row][col] == 0 for row in range(rows)):  
+            # Pick a random row and set it to 1
+            random_row = random.randint(0, rows - 1)
+            tableau[random_row][col] = 1
 
+    return tableau
 
 def test_synthesiser(tableau):
     """
@@ -52,6 +60,8 @@ def test_synthesiser(tableau):
     resynthesizer.print_result(style="cex")
     resynthesizer.print_result(style="detail")
 
+
+
 # Call the test function
 if __name__ == "__main__":
     
@@ -60,13 +70,16 @@ if __name__ == "__main__":
     #     [1, 0, 0, 1],
     #     [1, 0, 1, 0],
     #     [1, 1, 0, 0],
+    #     [1, 1, 0, 0],
+    #     [1, 1, 0, 0],
     #     [0, 1, 0, 1]
     # ]
     
     # Define a random tableau for testing
-    tableau = generate_random_tableau(4, 4, seed=25)
-    # print("Input tableau is: ")
-    # for row in tableau:
-    #     print(row)
+    tableau = generate_random_tableau(4, 6, seed=25)
+
+    print("Input tableau is: ")
+    for row in tableau:
+        print(row)
 
     test_synthesiser(tableau)
