@@ -5,7 +5,8 @@ from bidict import bidict  # Import the bidict library
 from dataclasses import dataclass
 import networkx as nx
 import time
-import time
+import os
+import subprocess
 
 @dataclass(frozen=True)
 class Variable:
@@ -64,6 +65,234 @@ class Variable:
         attrs_str = ", ".join(f"{key}={value}" for key, value in attrs.items())
         return f"Variable({attrs_str})"
 
+class BTOR2:
+    """
+    A class to convert a Pauli rotation tableau into a BTOR2 file format.
+    BTOR2 is a word-level format for model checking and other verification tasks.
+    """
+    
+    def __init__(self, tableau, target_tableau=None):
+        """
+        Initialize the BTOR2 converter with a Pauli rotation tableau.
+        
+        Parameters:
+            tableau: The input Pauli rotation tableau to be converted
+            target_tableau: The target tableau to be reached (for verification)
+        """
+        self.tableau = tableau
+        self.target_tableau = target_tableau
+        self.qubit_num = len(tableau) // 2
+        self.rotation_num = len(tableau[0]) if len(tableau) > 0 else 0
+        self.btor2_lines = []
+        self.counter = 1  # Counter for BTOR2 line numbers (node IDs)
+        
+        # Store different types of BTOR2 ID mappings
+        self.sorts = {}  # Store different types (e.g., bitvec 1)
+        
+        # Variable ID mappings
+        self.state_vars = {}  # Format: {(row, col): node_id}
+        self.next_state_vars = {}  # Format: {(row, col): node_id} for next state variables
+        self.op_vars = {}  # Format: {(op_type, qubit(s)): node_id}
+        self.monitor_vars = {}  # Format: {(monitor_type, col): node_id}
+        
+        # Tracking for constants and other frequently used nodes
+        self.constants = {}  # Format: {value: node_id}
+        
+        # Intermediate node mapping (for reusing identical operations)
+        self.node_cache = {}  # Format: {(op_type, operands): node_id}
+        
+        # ABC interface
+        self.abc_path = os.path.join(os.path.dirname(__file__), '..', 'abc', 'abc')
+        if not os.path.exists(self.abc_path):
+            raise RuntimeError("ABC binary not found. Please compile ABC first.")
+   
+    
+        
+    def convert(self, output_file):
+        """
+        Convert the tableau to BTOR2 format and write to file.
+        
+        Parameters:
+            output_file (str): The name of the output BTOR2 file
+        """
+        # Step 1: Define all variables and sorts
+        self.define_variables()
+        
+        # Step 2: Set up initial state
+        self.define_initial_state()
+        
+        # Step 3: Define transition relations
+        self.define_transitions()
+        
+        # Step 4: Define monitoring logic
+        self.define_monitors()
+        
+        # Step 5: Specify the property to verify
+        self.define_property()
+        
+        # Step 6: Write the BTOR2 description to a file
+        self.write_to_file(output_file)
+
+        return self.btor2_lines
+
+    def define_variables(self):
+        """
+        Define all variables needed for the BTOR2 model:
+        - Bit vector sort
+        - Current state matrix (2N x M boolean matrix)
+        - Valid flags (one for each column)
+        - Complete flags (one for each column)
+        - Property flag
+        - Operation variables (inputs for S, H, CX gates)
+        """
+        # Define bit vector sort of width 1 (for boolean variables)
+        bit_sort = self.add_sort("bitvec", 1)
+        
+        # Define constants 0 and 1 for later use
+        self.constants[0] = self.counter
+        self.btor2_lines.append(f"{self.counter} const {bit_sort} 0")
+        self.counter += 1
+        
+        self.constants[1] = self.counter
+        self.btor2_lines.append(f"{self.counter} const {bit_sort} 1")
+        self.counter += 1
+        
+        # 1. Define state variables for the tableau matrix (2N x M)
+        for row in range(2 * self.qubit_num):
+            for col in range(self.rotation_num):
+                # Current state variables
+                state_id = self.counter
+                self.state_vars[(row, col)] = state_id
+                self.btor2_lines.append(f"{state_id} state {bit_sort}")
+                self.counter += 1
+                
+                # Next state variables
+                next_state_id = self.counter
+                self.next_state_vars[(row, col)] = next_state_id
+                self.btor2_lines.append(f"{next_state_id} state {bit_sort}")
+                self.counter += 1
+        
+        # 2. Define valid flags for each column
+        for col in range(self.rotation_num):
+            valid_id = self.counter
+            self.monitor_vars[('valid', col)] = valid_id
+            self.btor2_lines.append(f"{valid_id} state {bit_sort}")
+            self.counter += 1
+        
+        # 3. Define complete flags for each column
+        for col in range(self.rotation_num):
+            complete_id = self.counter
+            self.monitor_vars[('completed', col)] = complete_id
+            self.btor2_lines.append(f"{complete_id} state {bit_sort}")
+            self.counter += 1
+        
+        # 4. Define property flag for verification
+        property_id = self.counter
+        self.monitor_vars[('property', None)] = property_id
+        self.btor2_lines.append(f"{property_id} state {bit_sort}")
+        self.counter += 1
+        
+        # 5. Define operation variables (as inputs)
+        # Define S gate operations for each qubit
+        for qubit in range(self.qubit_num):
+            s_op_id = self.counter
+            self.op_vars[('S', qubit)] = s_op_id
+            self.btor2_lines.append(f"{s_op_id} input {bit_sort}")  # Using input for operation variables
+            self.counter += 1
+        
+        # Define H gate operations for each qubit
+        for qubit in range(self.qubit_num):
+            h_op_id = self.counter
+            self.op_vars[('H', qubit)] = h_op_id
+            self.btor2_lines.append(f"{h_op_id} input {bit_sort}")
+            self.counter += 1
+        
+        # Define CX gate operations for each control-target qubit pair
+        for control in range(self.qubit_num):
+            for target in range(self.qubit_num):
+                if control != target:  # Skip CX from a qubit to itself
+                    cx_op_id = self.counter
+                    self.op_vars[('CX', (control, target))] = cx_op_id
+                    self.btor2_lines.append(f"{cx_op_id} input {bit_sort}")
+                    self.counter += 1
+
+    def define_initial_state(self):
+        """
+        Define the initial state of the tableau:
+        - Set initial values for the state matrix based on input tableau
+        - Set initial values for valid and complete flags
+        """
+        # Similar to encode_initial_state
+        pass
+        
+    def define_transitions(self):
+        """
+        Define the transition relations:
+        - Operation effects on state matrix
+        - Next state computation based on applied operations
+        - State update logic (flip-flops)
+        """
+        # Implements the transition logic for quantum operations
+        pass
+        
+    def define_monitors(self):
+        """
+        Define monitor logic:
+        - Valid flag computation for each column
+        - Complete flag computation for each column 
+        - Flag update logic
+        """
+        # Implements monitor logic
+        pass
+        
+    def define_property(self):
+        """
+        Define the property to be verified:
+        - Target tableau reached
+        - All columns completed
+        """
+        # Specifies the verification goal
+        pass
+        
+    def write_to_file(self, filename):
+        """
+        Write the generated BTOR2 description to a file.
+        
+        Parameters:
+            filename (str): The name of the output BTOR2 file
+        """
+        with open(filename, 'w') as f:
+            for line in self.btor2_lines:
+                f.write(line + '\n')
+        print(f"BTOR2 description written to {filename}")
+
+    def verify_with_abc(self, btor2_file):
+        """
+        Use ABC to verify the BTOR2 model.
+        
+        Parameters:
+            btor2_file (str): Path to the BTOR2 file to verify
+            
+        Returns:
+            bool: True if verification passed, False otherwise
+        """
+        try:
+            # Run ABC with the BTOR2 file
+            cmd = [self.abc_path, '-c', f'read_btor {btor2_file}; pdr']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            # Check verification result
+            if 'Property proved.' in result.stdout:
+                return True
+            elif 'Counter-example found.' in result.stdout:
+                return False
+            else:
+                raise RuntimeError(f"Unexpected ABC output: {result.stdout}")
+                
+        except Exception as e:
+            print(f"Error running ABC: {e}")
+            return False
+
 class tableau_resynthesis:
     def __init__(self, tableau):
         # Initialize the SAT formula and solver
@@ -82,20 +311,6 @@ class tableau_resynthesis:
         # Use bidirectional mapping for variables
         self.var_bimap = bidict()  # Maps variable indices to Variable objects and vice versa
         self.next_var_index = 1  # Keeps track of the next available SAT variable index
-
-        # Tracking Variables and Clauses
-        self.var_counter = {
-            "state": 0,
-            "op": 0,
-            "monitor": 0,
-            "aux": 0,
-        }
-        self.clause_counter = {
-            "initial": 0,
-            "transition": 0,
-            "gate_constraint": 0,
-            "monitor": 0,
-        }  
 
         # Tracking Variables and Clauses
         self.var_counter = {
@@ -227,7 +442,6 @@ class tableau_resynthesis:
             self.var_bimap[self.next_var_index] = variable
             self.next_var_index += 1
             self.var_counter[type] += 1
-            self.var_counter[type] += 1
         return self.var_bimap.inverse[variable]
 
     def id2var(self, id: int):
@@ -243,23 +457,6 @@ class tableau_resynthesis:
         if id not in self.var_bimap:
             raise ValueError(f"Variable {id} not found in mapping.")
         return self.var_bimap[id]
-
-    def get_all_op_ids(self):
-        """
-        Retrieves all SAT variable IDs corresponding to operation variables.
-        
-        Returns:
-            List[int]: A list of SAT variable IDs for all operation variables.
-        """
-        op_ids = []
-
-        # Iterate over the bidirectional variable map
-        for var_id, variable in self.var_bimap.items():
-            if isinstance(variable, Variable) and variable.var_type == "op":
-                op_ids.append(var_id)
-
-        return op_ids    
-    
 
     def get_all_op_ids(self):
         """
