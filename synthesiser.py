@@ -65,234 +65,408 @@ class Variable:
         attrs_str = ", ".join(f"{key}={value}" for key, value in attrs.items())
         return f"Variable({attrs_str})"
 
-class BTOR2:
-    """
-    A class to convert a Pauli rotation tableau into a BTOR2 file format.
-    BTOR2 is a word-level format for model checking and other verification tasks.
-    """
-    
-    def __init__(self, tableau, target_tableau=None):
+
+class Btor2generator:
+    def __init__(self, tableau, DG: nx.DiGraph):
         """
-        Initialize the BTOR2 converter with a Pauli rotation tableau.
-        
-        Parameters:
-            tableau: The input Pauli rotation tableau to be converted
-            target_tableau: The target tableau to be reached (for verification)
+        Initialize the BTOR2 generator.
         """
         self.tableau = tableau
-        self.target_tableau = target_tableau
-        self.qubit_num = len(tableau) // 2
-        self.rotation_num = len(tableau[0]) if len(tableau) > 0 else 0
-        self.btor2_lines = []
-        self.counter = 1  # Counter for BTOR2 line numbers (node IDs)
+        self.DG = DG
+        # Since the state matrix is of size 2N x M, here N = 2 and M = 2 (a 4x2 matrix)
+        self.qubit_num = len(tableau) // 2  
+        self.rotation_num = len(tableau[0]) if tableau else 0
+        self.btor2_lines = []    # Stores BTOR2 statements
+        self.counter = 1         # Node counter
         
-        # Store different types of BTOR2 ID mappings
-        self.sorts = {}  # Store different types (e.g., bitvec 1)
+        # Dictionaries for various types of variables
+        self.state_vars = {}        # Format: (row, col) -> node id (current state)
+        self.next_state_vars = {}   # Format: (row, col) -> node id (next state)
+        self.op_vars = {}           # Format: (op_type, qubit or (ctrl, tgt)) -> node id
+        self.op_vars_by_qubit = {}  # Format: qubit -> list of operations
+        self.monitor_vars = {}      # Format: (monitor_type, col) -> node id
         
-        # Variable ID mappings
-        self.state_vars = {}  # Format: {(row, col): node_id}
-        self.next_state_vars = {}  # Format: {(row, col): node_id} for next state variables
-        self.op_vars = {}  # Format: {(op_type, qubit(s)): node_id}
-        self.monitor_vars = {}  # Format: {(monitor_type, col): node_id}
-        
-        # Tracking for constants and other frequently used nodes
-        self.constants = {}  # Format: {value: node_id}
-        
-        # Intermediate node mapping (for reusing identical operations)
-        self.node_cache = {}  # Format: {(op_type, operands): node_id}
-        
-        # ABC interface
-        self.abc_path = os.path.join(os.path.dirname(__file__), '..', 'abc', 'abc')
-        if not os.path.exists(self.abc_path):
-            raise RuntimeError("ABC binary not found. Please compile ABC first.")
-   
-    
-        
-    def convert(self, output_file):
-        """
-        Convert the tableau to BTOR2 format and write to file.
-        
-        Parameters:
-            output_file (str): The name of the output BTOR2 file
-        """
-        # Step 1: Define all variables and sorts
-        self.define_variables()
-        
-        # Step 2: Set up initial state
-        self.define_initial_state()
-        
-        # Step 3: Define transition relations
-        self.define_transitions()
-        
-        # Step 4: Define monitoring logic
-        self.define_monitors()
-        
-        # Step 5: Specify the property to verify
-        self.define_property()
-        
-        # Step 6: Write the BTOR2 description to a file
-        self.write_to_file(output_file)
+        # Constants dictionary for 0 and 1
+        self.constants = {}
 
-        return self.btor2_lines
+        # Generate the BTOR2 description immediately
+        # self.generate_btor2()
 
-    def define_variables(self):
-        """
-        Define all variables needed for the BTOR2 model:
-        - Bit vector sort
-        - Current state matrix (2N x M boolean matrix)
-        - Valid flags (one for each column)
-        - Complete flags (one for each column)
-        - Property flag
-        - Operation variables (inputs for S, H, CX gates)
-        """
-        # Define bit vector sort of width 1 (for boolean variables)
-        bit_sort = self.add_sort("bitvec", 1)
-        
-        # Define constants 0 and 1 for later use
-        self.constants[0] = self.counter
-        self.btor2_lines.append(f"{self.counter} const {bit_sort} 0")
+    def add_line(self, line):
+        """Add a BTOR2 statement and return its node id, then increment the counter."""
+        self.btor2_lines.append(str(self.counter) + " " + line)
+        current = self.counter
         self.counter += 1
+        return current
+
+    def generate_btor2(self):
+        """Generate BTOR2 statements by calling helper subfunctions."""
+        self.generate_constants()
+        self.generate_current_state()
+        self.generate_next_state()
+        self.generate_op_vars()
+        self.generate_limit_PI()
+        self.generate_transitions()
+        self.generate_monitors()
+        self.generate_flip_flops()
+
+    def generate_constants(self):
+        """Define sort and constants."""
+        self.add_line("sort bitvec 1")
+        const0 = self.add_line("const 1 0")
+        const1 = self.add_line("const 1 1")
+        self.constants[0] = const0
+        self.constants[1] = const1
+
+    def generate_current_state(self):
+        """Define the current state matrix (2N x M) and initialize it using the provided tableau."""
+        for col in range(self.rotation_num):
+            for row in range(2 * self.qubit_num):
+                node_id = self.add_line("state 1")
+                self.state_vars[(row, col)] = node_id
+        for col in range(self.rotation_num):
+            for row in range(2 * self.qubit_num):
+                value = self.tableau[row][col]
+                const_id = self.constants[1] if value == 1 else self.constants[0]
+                state_id = self.state_vars[(row, col)]
+                self.add_line(f"init 1 {state_id} {const_id}")
+
+    def generate_next_state(self):
+        """Define the next state matrix (2N x M)."""
+        for col in range(self.rotation_num):
+            for row in range(2 * self.qubit_num):
+                node_id = self.add_line("state 1")
+                self.next_state_vars[(row, col)] = node_id
+
+    def generate_op_vars(self):
+        """
+        Define operation variables (as primary inputs) dynamically based on the number of qubits.
+        For each qubit i, we define:
+        - Single-qubit operations: S_i and H_i.
+        - Two-qubit CX operations: for every pair i != j, define CX_{i,j}.
+        These operations are stored in:
+        - self.op_vars: a dictionary mapping an operation key to its node id.
+        - self.op_vars_by_qubit: a dictionary mapping each qubit index to a list of operation keys that involve that qubit.
+        """
+        self.op_vars_by_qubit = {i: [] for i in range(self.qubit_num)}
+        # Single-qubit operations
+        for i in range(self.qubit_num):
+            op_key = ("S", i)
+            node_id = self.add_line("input 1")
+            self.op_vars[op_key] = node_id
+            self.op_vars_by_qubit[i].append(op_key)
+
+            op_key = ("H", i)
+            node_id = self.add_line("input 1")
+            self.op_vars[op_key] = node_id
+            self.op_vars_by_qubit[i].append(op_key)
+
+        # Two-qubit CX operations (for each ordered pair i != j)
+        for i in range(self.qubit_num):
+            for j in range(self.qubit_num):
+                if i == j:
+                    continue
+                op_key = ("CX", (i, j))
+                node_id = self.add_line("input 1")
+                self.op_vars[op_key] = node_id
+                # Add this operation to both qubit i and qubit j's lists.
+                self.op_vars_by_qubit[i].append(op_key)
+                self.op_vars_by_qubit[j].append(op_key)
+
+    def generate_limit_PI(self):
+        """
+        Add constraints so that for each qubit, at most one operation is true.
+        This is done by iterating over the list of operations associated with each qubit
+        (stored in self.op_vars_by_qubit) and adding pairwise mutex constraints.
+        """
+        def add_mutex(op_a, op_b):
+            a_id = self.op_vars[op_a]
+            b_id = self.op_vars[op_b]
+            nand_id = self.add_line(f"nand 1 {a_id} {b_id}")
+            self.add_line(f"bad {nand_id}")
+
+        # For each qubit, add pairwise constraints among all operations associated with that qubit.
+        for qubit, op_list in self.op_vars_by_qubit.items():
+            for i in range(len(op_list)):
+                for j in range(i + 1, len(op_list)):
+                    add_mutex(op_list[i], op_list[j])
+
+    def generate_transitions(self):
+        """Define integrated state transition constraints based on S, H, and CX operations
+        in a single nested ite chain per qubit and per column.
         
-        self.constants[1] = self.counter
-        self.btor2_lines.append(f"{self.counter} const {bit_sort} 1")
-        self.counter += 1
-        
-        # 1. Define state variables for the tableau matrix (2N x M)
-        for row in range(2 * self.qubit_num):
-            for col in range(self.rotation_num):
-                # Current state variables
-                state_id = self.counter
-                self.state_vars[(row, col)] = state_id
-                self.btor2_lines.append(f"{state_id} state {bit_sort}")
-                self.counter += 1
+        For each qubit i and for each column col:
+        - For the Z part (control effect):
+            next_Z_i = ite(H_i, current_X_i,
+                            ite(S_i, current_Z_i XOR current_X_i,
+                                ite(CX_{i,j1}, current_Z_i XOR current_Z_{j1},
+                                    ite(CX_{i,j2}, current_Z_i XOR current_Z_{j2},
+                                        ... current_Z_i))))
+        - For the X part (target effect):
+            next_X_i = ite(H_i, current_Z_i,
+                            ite(CX_{j1,i}, current_X_i XOR current_X_{j1},
+                                ite(CX_{j2,i}, current_X_i XOR current_X_{j2},
+                                    current_X_i)))
+        Assumes that operations are mutually exclusive.
+        """
+        for col in range(self.rotation_num):
+            for i in range(self.qubit_num):
+                # -----------------------
+                # Build the next Z value for qubit i (control role)
+                s_op = self.op_vars.get(("S", i))
+                h_op = self.op_vars.get(("H", i))
+                cur_z = self.state_vars[(i, col)]
+                cur_x = self.state_vars[(self.qubit_num + i, col)]
+                next_z = self.next_state_vars[(i, col)]
                 
-                # Next state variables
-                next_state_id = self.counter
-                self.next_state_vars[(row, col)] = next_state_id
-                self.btor2_lines.append(f"{next_state_id} state {bit_sort}")
-                self.counter += 1
-        
-        # 2. Define valid flags for each column
-        for col in range(self.rotation_num):
-            valid_id = self.counter
-            self.monitor_vars[('valid', col)] = valid_id
-            self.btor2_lines.append(f"{valid_id} state {bit_sort}")
-            self.counter += 1
-        
-        # 3. Define complete flags for each column
-        for col in range(self.rotation_num):
-            complete_id = self.counter
-            self.monitor_vars[('completed', col)] = complete_id
-            self.btor2_lines.append(f"{complete_id} state {bit_sort}")
-            self.counter += 1
-        
-        # 4. Define property flag for verification
-        property_id = self.counter
-        self.monitor_vars[('property', None)] = property_id
-        self.btor2_lines.append(f"{property_id} state {bit_sort}")
-        self.counter += 1
-        
-        # 5. Define operation variables (as inputs)
-        # Define S gate operations for each qubit
-        for qubit in range(self.qubit_num):
-            s_op_id = self.counter
-            self.op_vars[('S', qubit)] = s_op_id
-            self.btor2_lines.append(f"{s_op_id} input {bit_sort}")  # Using input for operation variables
-            self.counter += 1
-        
-        # Define H gate operations for each qubit
-        for qubit in range(self.qubit_num):
-            h_op_id = self.counter
-            self.op_vars[('H', qubit)] = h_op_id
-            self.btor2_lines.append(f"{h_op_id} input {bit_sort}")
-            self.counter += 1
-        
-        # Define CX gate operations for each control-target qubit pair
-        for control in range(self.qubit_num):
-            for target in range(self.qubit_num):
-                if control != target:  # Skip CX from a qubit to itself
-                    cx_op_id = self.counter
-                    self.op_vars[('CX', (control, target))] = cx_op_id
-                    self.btor2_lines.append(f"{cx_op_id} input {bit_sort}")
-                    self.counter += 1
+                # Start with the default value: current Z
+                nested_cx_z = cur_z
+                # For every CX where qubit i is the control (i.e. CX_{i,j} for j != i)
+                for j in range(self.qubit_num):
+                    if j == i:
+                        continue
+                    cx_key = ("CX", (i, j))
+                    cx_op = self.op_vars.get(cx_key)
+                    if cx_op is None:
+                        continue
+                    # Compute the CX effect: current Z_i XOR current Z_j
+                    other_z = self.state_vars[(j, col)]
+                    xor_cx = self.add_line(f"xor 1 {cur_z} {other_z}")
+                    # Nest the ite: if CX_{i,j} is active, use the XOR result; otherwise, use the previous value
+                    nested_cx_z = self.add_line(f"ite 1 {cx_op} {xor_cx} {nested_cx_z}")
+                
+                # S effect: if S is active, use current Z XOR current X; else fallback to nested_cx_z
+                xor_s = self.add_line(f"xor 1 {cur_z} {cur_x}")
+                nested_s = self.add_line(f"ite 1 {s_op} {xor_s} {nested_cx_z}")
+                
+                # H effect has highest priority: if H is active, next Z = current X; else use nested_s result
+                final_z = self.add_line(f"ite 1 {h_op} {cur_x} {nested_s}")
+                self.add_line(f"eq 1 {final_z} {next_z}")
+                
+                # -----------------------
+                # Build the next X value for qubit i (target role)
+                next_x = self.next_state_vars[(self.qubit_num + i, col)]
+                # Default value for X is the current X
+                nested_cx_x = self.state_vars[(self.qubit_num + i, col)]
+                # For every CX where qubit i is the target (i.e. CX_{j,i} for j != i)
+                for j in range(self.qubit_num):
+                    if j == i:
+                        continue
+                    cx_key = ("CX", (j, i))
+                    cx_op = self.op_vars.get(cx_key)
+                    if cx_op is None:
+                        continue
+                    # Compute the CX effect: current X_i XOR current X_j
+                    other_x = self.state_vars[(self.qubit_num + j, col)]
+                    xor_cx_x = self.add_line(f"xor 1 {self.state_vars[(self.qubit_num + i, col)]} {other_x}")
+                    nested_cx_x = self.add_line(f"ite 1 {cx_op} {xor_cx_x} {nested_cx_x}")
+                
+                # H effect on X: if H is active, next X = current Z (swapping); else use the nested CX result
+                final_x = self.add_line(f"ite 1 {h_op} {cur_z} {nested_cx_x}")
+                self.add_line(f"eq 1 {final_x} {next_x}")
 
-    def define_initial_state(self):
+    def generate_monitors(self):
         """
-        Define the initial state of the tableau:
-        - Set initial values for the state matrix based on input tableau
-        - Set initial values for valid and complete flags
         """
-        # Similar to encode_initial_state
-        pass
-        
-    def define_transitions(self):
-        """
-        Define the transition relations:
-        - Operation effects on state matrix
-        - Next state computation based on applied operations
-        - State update logic (flip-flops)
-        """
-        # Implements the transition logic for quantum operations
-        pass
-        
-    def define_monitors(self):
-        """
-        Define monitor logic:
-        - Valid flag computation for each column
-        - Complete flag computation for each column 
-        - Flag update logic
-        """
-        # Implements monitor logic
-        pass
-        
-    def define_property(self):
-        """
-        Define the property to be verified:
-        - Target tableau reached
-        - All columns completed
-        """
-        # Specifies the verification goal
-        pass
-        
-    def write_to_file(self, filename):
-        """
-        Write the generated BTOR2 description to a file.
-        
-        Parameters:
-            filename (str): The name of the output BTOR2 file
-        """
-        with open(filename, 'w') as f:
-            for line in self.btor2_lines:
-                f.write(line + '\n')
-        print(f"BTOR2 description written to {filename}")
+        self.generate_valid_flags()
+        self.generate_complete_flags()
+        self.generate_property()
 
-    def verify_with_abc(self, btor2_file):
+    def generate_valid_flags(self):
         """
-        Use ABC to verify the BTOR2 model.
+        Generate the valid flag for each column.
+        For each column, the valid flag is defined as:
+        valid_flag = (one-hot condition on the Z variables) AND (all X variables are false)
+        - The one-hot condition requires that exactly one Z variable (among the first self.qubit_num rows) is true.
+        For two qubits, this is encoded as an XOR gate.
+        For more than two qubits, a sequential encoding or pairwise constraints must be used.
+        - The all-X-false condition requires that every X variable (rows self.qubit_num to 2*self.qubit_num-1) is false.
+        This function creates a monitor variable for each column and adds an equation asserting its value.
+        """
+        for col in range(self.rotation_num):
+            # Create a monitor variable for the valid flag of this column.
+            valid_col = self.add_line("state 1")
+            self.monitor_vars[("valid", col)] = valid_col
+
+            # Extract the Z and X variables for this column.
+            Z_vars = [self.state_vars[(i, col)] for i in range(self.qubit_num)]
+            X_vars = [self.state_vars[(i + self.qubit_num, col)] for i in range(self.qubit_num)]
+
+            # Compute the one-hot condition for Z_vars.
+            if self.qubit_num == 2:
+                # For 2 qubits, a one-hot condition can be encoded as XOR.
+                one_hot_z = self.add_line(f"xor 1 {Z_vars[0]} {Z_vars[1]}")
+            else:
+                # For more than 2 qubits, enforce exactly one is true among Z_vars.
+                # Compute the "at least one true" condition: OR of all Z_vars.
+                or_all = self.add_line(f"or 1 {Z_vars[0]} {Z_vars[1]}")
+                for k in range(2, len(Z_vars)):
+                    or_all = self.add_line(f"or 1 {or_all} {Z_vars[k]}")
+
+                # Compute the "at most one true" condition: For every pair, enforce NOT(AND(Z_i, Z_j)).
+                pairwise_conditions = []
+                for i in range(len(Z_vars)):
+                    for j in range(i + 1, len(Z_vars)):
+                        nand_pair = self.add_line(f"nand 1 {Z_vars[i]} {Z_vars[j]}")
+                        pairwise_conditions.append(nand_pair)
+
+                # Combine all pairwise conditions using an AND chain.
+                if pairwise_conditions:
+                    at_most = pairwise_conditions[0]
+                    for cond in pairwise_conditions[1:]:
+                        at_most = self.add_line(f"and 1 {at_most} {cond}")
+                else:
+                    at_most = self.constants[1]  # Trivially true if there's only one variable.
+
+                # Combine the "at least one" and "at most one" conditions to enforce exactly one true.
+                one_hot_z = self.add_line(f"and 1 {or_all} {at_most}")
+
+            # Compute the all-X-false condition.
+            # For each X variable, compute its negation.
+            not_X_vars = [self.add_line(f"not 1 {x}") for x in X_vars]
+            # Combine all the negations using an "and" gate.
+            if len(not_X_vars) == 1:
+                all_x_false = not_X_vars[0]
+            else:
+                all_x_false = not_X_vars[0]
+                for not_x in not_X_vars[1:]:
+                    all_x_false = self.add_line(f"and 1 {all_x_false} {not_x}")
+
+            # The valid flag is the AND of the one-hot condition and the all-X-false condition.
+            valid_expr = self.add_line(f"and 1 {one_hot_z} {all_x_false}")
+            # Assert that the computed valid expression equals the monitor variable.
+            self.add_line(f"eq 1 {valid_expr} {valid_col}")
+    
+    def generate_complete_flags(self):
+        """
+        For each column, create two state variables:
+        - complete_current: represents the column's current complete flag.
+        - complete_next: represents the column's next complete flag.
         
-        Parameters:
-            btor2_file (str): Path to the BTOR2 file to verify
+        Then, encode the transition as:
+        
+            complete_next = ( (valid flag AND (AND over all predecessor columns’ complete_current))
+                            OR complete_current )
+        
+        This means a column becomes (or remains) complete if either it was already complete,
+        or it is valid and all of its predecessor columns are complete.
+        
+        In a sequential circuit, the flip-flop mechanism will update complete_current with the value
+        of complete_next in the next clock cycle.
+        """
+        for col in range(self.rotation_num):
+            # Create state variables for the current and next complete flags.
+            comp_current = self.add_line("state 1")
+            comp_next    = self.add_line("state 1")
+            self.monitor_vars[("complete_current", col)] = comp_current
+            self.monitor_vars[("complete_next", col)]    = comp_next
+
+            # Initialize complete_current to 0.
+            self.add_line(f"init 1 {comp_current} {self.constants[0]}")
+
+            # Retrieve the valid flag for this column
+            valid_flag = self.monitor_vars.get(("valid", col))
+
+            # Obtain the complete_current values for all predecessor columns.
+            preds = list(self.DG.predecessors(col))
+            if not preds:
+                # If there are no predecessors, treat the "all predecessors complete" condition as true.
+                all_preds = self.constants[1]
+            else:
+                # For each predecessor, retrieve (or create) its current complete flag.
+                all_preds = None
+                for p in preds:
+                    comp_p = self.monitor_vars[("complete_current", p)]
+                    if all_preds is None:
+                        all_preds = comp_p
+                    else:
+                        all_preds = self.add_line(f"and 1 {all_preds} {comp_p}")
             
-        Returns:
-            bool: True if verification passed, False otherwise
+            # Compute the condition: valid_flag AND (all predecessors complete)
+            condition = self.add_line(f"and 1 {valid_flag} {all_preds}")
+            # Compute the next complete flag as the OR of the condition and the current complete flag.
+            final_expr = self.add_line(f"or 1 {condition} {comp_current}")
+            # Assert the equality: complete_next = final_expr
+            self.add_line(f"eq 1 {final_expr} {comp_next}")
+            
+    
+    def generate_property(self):
+        """
+        Generate the property variable for the BTOR2 model.
+        
+        The property is defined as the AND of the complete_next monitor variables for all
+        columns in the last layer of the dependency graph (i.e., those with no outgoing edges).
+        
+        If there are no nodes in the dependency graph, the property is set to true.
+        
+        The resulting property variable is stored in self.monitor_vars[("property", None)].
+        """
+        # Identify last-layer nodes: columns with no outgoing edges in the dependency graph.
+        last_layer = [col for col in range(self.rotation_num) if self.DG.out_degree(col) == 0]
+        
+        # Retrieve the complete_next variable for each last-layer column.
+        complete_next_nodes = []
+        for col in last_layer:
+            key = ("complete_next", col)
+            complete_next_nodes.append(self.monitor_vars[key])
+        
+        # Build an AND chain over these complete_next variables.
+        if len(complete_next_nodes) == 1:
+            property_node = complete_next_nodes[0]
+        else:
+            property_expr = complete_next_nodes[0]
+            for node in complete_next_nodes[1:]:
+                property_expr = self.add_line(f"and 1 {property_expr} {node}")
+            property_node = property_expr
+        
+        # Store the property in the monitor variables dictionary.
+        self.monitor_vars[("property", None)] = property_node
+        
+        # Optionally, you could add a constraint to trigger a bad state if the property is false:
+        self.add_line(f"bad {property_node}")
+
+    def generate_flip_flops(self):
+        """
+        Generate flip-flop connections for the sequential circuit using the 'next' command.
+        
+        For every state variable (in the main state matrix) and for each column’s complete flag,
+        generate a 'next' command to connect the current state with the next state.
+        
+        For example, if a current state variable has node id 3 and its computed next state is node id 6,
+        the function will generate a line like:
+            7 next 1 3 6
+        which tells the model that at the next clock cycle, the value of the state variable (id 3)
+        should be updated with the value from node id 6.
+        """
+        # Connect main state variables.
+        for col in range(self.rotation_num):
+            comp_curr = self.monitor_vars[("complete_current", col)]
+            comp_next = self.monitor_vars[("complete_next", col)]
+            self.add_line(f"next 1 {comp_curr} {comp_next}")
+            for row in range(2 * self.qubit_num):
+                curr = self.state_vars[(row, col)]
+                nxt  = self.next_state_vars[(row, col)]
+                self.add_line(f"next 1 {curr} {nxt}")
+    
+    def write_btor2(self, filename = "synthesiser.btor2"):
+        """
+        Writes the generated BTOR2 model to a file.
+        
+        Parameters:
+            filename (str): The path to the output file.
+            
+        This function iterates over all BTOR2 statements stored in self.btor2_lines
+        and writes each line into the file, appending a newline character.
         """
         try:
-            # Run ABC with the BTOR2 file
-            cmd = [self.abc_path, '-c', f'read_btor {btor2_file}; pdr']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # Check verification result
-            if 'Property proved.' in result.stdout:
-                return True
-            elif 'Counter-example found.' in result.stdout:
-                return False
-            else:
-                raise RuntimeError(f"Unexpected ABC output: {result.stdout}")
-                
+            with open(filename, "w") as f:
+                for line in self.btor2_lines:
+                    f.write(line + "\n")
+            print(f"BTOR2 model successfully written to {filename}.")
         except Exception as e:
-            print(f"Error running ABC: {e}")
-            return False
-
+            print(f"Error writing BTOR2 model to file: {e}")
+    
+    
 class tableau_resynthesis:
     def __init__(self, tableau):
         # Initialize the SAT formula and solver
@@ -325,6 +499,9 @@ class tableau_resynthesis:
             "gate_constraint": 0,
             "monitor": 0,
         }  
+
+        self.build_rotation_dependency_graph()
+        self.btor2_generator = None
 
     def build_rotation_dependency_graph(self):
         """
@@ -1411,6 +1588,14 @@ class tableau_resynthesis:
         """
         return self.MaxDepth
 
+    def generate_btor2_file(self, filename = "synthesiser.btor2"):
+        """
+        Generates the BTOR2 model for the tableau resynthesis problem.
+        """
+        self.btor2_generator = Btor2generator(self.tableau, self.DG)
+        self.btor2_generator.generate_btor2()
+        self.btor2_generator.write_btor2(filename)
+    
     def BMC(self, t):
         """
         Bounded Model Checking (BMC) for tableau resynthesis.
@@ -1554,4 +1739,4 @@ class tableau_resynthesis:
         else:
             print("No model found.")
     
-            
+
