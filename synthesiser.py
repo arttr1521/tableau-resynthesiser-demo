@@ -183,7 +183,7 @@ class Btor2generator:
             a_id = self.op_vars[op_a]
             b_id = self.op_vars[op_b]
             nand_id = self.add_line(f"nand 1 {a_id} {b_id}")
-            self.add_line(f"bad {nand_id}")
+            self.add_line(f"eq 1 {nand_id} {self.constants[0]}")
 
         # For each qubit, add pairwise constraints among all operations associated with that qubit.
         for qubit, op_list in self.op_vars_by_qubit.items():

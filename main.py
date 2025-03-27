@@ -75,7 +75,7 @@ def test_btor2_generator(tableau):
     Test function for the Btor2generator class.
     """
     resynthesizer = tableau_resynthesis(tableau)
-    resynthesizer.generate_btor2_file()
+    resynthesizer.generate_btor2_file("benchmark/btor2/synthesiser.btor2")
 
 
 # Call the test function
