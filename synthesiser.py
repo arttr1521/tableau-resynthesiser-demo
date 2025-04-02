@@ -103,7 +103,7 @@ class Btor2generator:
         """Generate BTOR2 statements by calling helper subfunctions."""
         self.generate_constants()
         self.generate_current_state()
-        self.generate_next_state()
+        # self.generate_next_state() // unused function
         self.generate_op_vars()
         self.generate_limit_PI()
         self.generate_transitions()
@@ -113,8 +113,8 @@ class Btor2generator:
     def generate_constants(self):
         """Define sort and constants."""
         self.add_line("sort bitvec 1")
-        const0 = self.add_line("const 1 0")
-        const1 = self.add_line("const 1 1")
+        const0 = self.add_line("zero 1")
+        const1 = self.add_line("one 1")
         self.constants[0] = const0
         self.constants[1] = const1
 
@@ -131,12 +131,12 @@ class Btor2generator:
                 state_id = self.state_vars[(row, col)]
                 self.add_line(f"init 1 {state_id} {const_id}")
 
-    def generate_next_state(self):
-        """Define the next state matrix (2N x M)."""
-        for col in range(self.rotation_num):
-            for row in range(2 * self.qubit_num):
-                node_id = self.add_line("state 1")
-                self.next_state_vars[(row, col)] = node_id
+    # def generate_next_state(self):
+    #     """Define the next state matrix (2N x M)."""
+    #     for col in range(self.rotation_num):
+    #         for row in range(2 * self.qubit_num):
+    #             node_id = self.add_line("state 1")
+    #             self.next_state_vars[(row, col)] = node_id
 
     def generate_op_vars(self):
         """
@@ -182,8 +182,9 @@ class Btor2generator:
         def add_mutex(op_a, op_b):
             a_id = self.op_vars[op_a]
             b_id = self.op_vars[op_b]
+            # force ¬(a ∧ b)
             nand_id = self.add_line(f"nand 1 {a_id} {b_id}")
-            self.add_line(f"eq 1 {nand_id} {self.constants[0]}")
+            self.add_line(f"constraint {nand_id}")
 
         # For each qubit, add pairwise constraints among all operations associated with that qubit.
         for qubit, op_list in self.op_vars_by_qubit.items():
@@ -217,7 +218,8 @@ class Btor2generator:
                 h_op = self.op_vars.get(("H", i))
                 cur_z = self.state_vars[(i, col)]
                 cur_x = self.state_vars[(self.qubit_num + i, col)]
-                next_z = self.next_state_vars[(i, col)]
+                next_z = None
+                next_x = None
                 
                 # Start with the default value: current Z
                 nested_cx_z = cur_z
@@ -240,12 +242,12 @@ class Btor2generator:
                 nested_s = self.add_line(f"ite 1 {s_op} {xor_s} {nested_cx_z}")
                 
                 # H effect has highest priority: if H is active, next Z = current X; else use nested_s result
-                final_z = self.add_line(f"ite 1 {h_op} {cur_x} {nested_s}")
-                self.add_line(f"eq 1 {final_z} {next_z}")
+                next_z = self.add_line(f"ite 1 {h_op} {cur_x} {nested_s}")
+                self.next_state_vars[(i, col)] = next_z
                 
                 # -----------------------
                 # Build the next X value for qubit i (target role)
-                next_x = self.next_state_vars[(self.qubit_num + i, col)]
+                # next_x = self.next_state_vars[(self.qubit_num + i, col)]
                 # Default value for X is the current X
                 nested_cx_x = self.state_vars[(self.qubit_num + i, col)]
                 # For every CX where qubit i is the target (i.e. CX_{j,i} for j != i)
@@ -262,8 +264,8 @@ class Btor2generator:
                     nested_cx_x = self.add_line(f"ite 1 {cx_op} {xor_cx_x} {nested_cx_x}")
                 
                 # H effect on X: if H is active, next X = current Z (swapping); else use the nested CX result
-                final_x = self.add_line(f"ite 1 {h_op} {cur_z} {nested_cx_x}")
-                self.add_line(f"eq 1 {final_x} {next_x}")
+                next_x = self.add_line(f"ite 1 {h_op} {cur_z} {nested_cx_x}")
+                self.next_state_vars[(self.qubit_num + i, col)] = next_x
 
     def generate_monitors(self):
         """
@@ -285,8 +287,8 @@ class Btor2generator:
         """
         for col in range(self.rotation_num):
             # Create a monitor variable for the valid flag of this column.
-            valid_col = self.add_line("state 1")
-            self.monitor_vars[("valid", col)] = valid_col
+            # valid_col = self.add_line("state 1")
+            # self.monitor_vars[("valid", col)] = valid_col
 
             # Extract the Z and X variables for this column.
             Z_vars = [self.state_vars[(i, col)] for i in range(self.qubit_num)]
@@ -333,9 +335,8 @@ class Btor2generator:
                     all_x_false = self.add_line(f"and 1 {all_x_false} {not_x}")
 
             # The valid flag is the AND of the one-hot condition and the all-X-false condition.
-            valid_expr = self.add_line(f"and 1 {one_hot_z} {all_x_false}")
-            # Assert that the computed valid expression equals the monitor variable.
-            self.add_line(f"eq 1 {valid_expr} {valid_col}")
+            valid_col = self.add_line(f"and 1 {one_hot_z} {all_x_false}")
+            self.monitor_vars[("valid", col)] = valid_col
     
     def generate_complete_flags(self):
         """
@@ -357,9 +358,9 @@ class Btor2generator:
         for col in range(self.rotation_num):
             # Create state variables for the current and next complete flags.
             comp_current = self.add_line("state 1")
-            comp_next    = self.add_line("state 1")
+            # comp_next    = self.add_line("state 1")
             self.monitor_vars[("complete_current", col)] = comp_current
-            self.monitor_vars[("complete_next", col)]    = comp_next
+            # self.monitor_vars[("complete_next", col)]    = comp_next
 
             # Initialize complete_current to 0.
             self.add_line(f"init 1 {comp_current} {self.constants[0]}")
@@ -371,7 +372,7 @@ class Btor2generator:
             preds = list(self.DG.predecessors(col))
             if not preds:
                 # If there are no predecessors, treat the "all predecessors complete" condition as true.
-                all_preds = self.constants[1]
+                condition = valid_flag
             else:
                 # For each predecessor, retrieve (or create) its current complete flag.
                 all_preds = None
@@ -382,12 +383,12 @@ class Btor2generator:
                     else:
                         all_preds = self.add_line(f"and 1 {all_preds} {comp_p}")
             
-            # Compute the condition: valid_flag AND (all predecessors complete)
-            condition = self.add_line(f"and 1 {valid_flag} {all_preds}")
+                # Compute the condition: valid_flag AND (all predecessors complete)
+                condition = self.add_line(f"and 1 {valid_flag} {all_preds}")
+
             # Compute the next complete flag as the OR of the condition and the current complete flag.
-            final_expr = self.add_line(f"or 1 {condition} {comp_current}")
-            # Assert the equality: complete_next = final_expr
-            self.add_line(f"eq 1 {final_expr} {comp_next}")
+            comp_next = self.add_line(f"or 1 {condition} {comp_current}")
+            self.monitor_vars[("complete_next", col)] = comp_next
             
     
     def generate_property(self):
@@ -403,6 +404,7 @@ class Btor2generator:
         """
         # Identify last-layer nodes: columns with no outgoing edges in the dependency graph.
         last_layer = [col for col in range(self.rotation_num) if self.DG.out_degree(col) == 0]
+        print(last_layer)
         
         # Retrieve the complete_next variable for each last-layer column.
         complete_next_nodes = []

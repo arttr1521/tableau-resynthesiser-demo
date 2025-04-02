@@ -70,12 +70,13 @@ def test_synthesiser(tableau):
     # resynthesizer.print_result(style="cex")
     resynthesizer.print_result(style="detail")
 
-def test_btor2_generator(tableau):
+def test_btor2_generator(tableau, filename="benchmark/btor2/test.btor2"):
     """
     Test function for the Btor2generator class.
     """
     resynthesizer = tableau_resynthesis(tableau)
-    resynthesizer.generate_btor2_file("benchmark/btor2/synthesiser.btor2")
+    resynthesizer.generate_btor2_file(filename)
+    resynthesizer.print_graph()
 
 
 # Call the test function
@@ -90,10 +91,10 @@ if __name__ == "__main__":
     ]
     
     # Define a random tableau for testing
-    # tableau = generate_random_tableau(4, 6, seed=25)
+    tableau = generate_random_tableau(4, 6, seed=25)
 
     print("Input tableau is: ")
     for row in tableau:
         print(row)
 
-    test_btor2_generator(tableau)
+    test_btor2_generator(tableau, filename="benchmark/btor2/4x6.btor2")
