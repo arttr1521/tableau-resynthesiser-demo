@@ -1598,7 +1598,14 @@ class tableau_resynthesis:
         self.btor2_generator.generate_btor2()
         self.btor2_generator.write_btor2(filename)
     
-    def BMC(self, t):
+    def build_bmc_cnf(self, t, output_filename = "bmc.cnf"):
+        """
+        Builds the BMC CNF for the tableau resynthesis problem.
+        """
+        self.BMC(t, build_cnf_only=True)
+        self.save_cnf_to_file(output_filename)
+    
+    def BMC(self, t, build_cnf_only = False):
         """
         Bounded Model Checking (BMC) for tableau resynthesis.
         Directly builds and solves the model at a fixed t.
@@ -1617,11 +1624,8 @@ class tableau_resynthesis:
         self.addProperty(t)  # Define P <=> (all columns completed at t=i)
         self.assertProperty(t, True)
 
-        # Debug
-        # self.save_cnf_to_file()
-        # self.print_graph()
-        # self.print_statistics()
-        # self.print_clauses(detail=True)
+        if build_cnf_only:
+            return
         
         op_ids = self.get_all_op_ids()
         self.set_phases(op_ids, False)
