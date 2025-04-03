@@ -1,0 +1,397 @@
+1 sort bitvec 1
+2 zero 1
+3 one 1
+4 state 1
+5 state 1
+6 state 1
+7 state 1
+8 state 1
+9 state 1
+10 state 1
+11 state 1
+12 state 1
+13 state 1
+14 state 1
+15 state 1
+16 state 1
+17 state 1
+18 state 1
+19 state 1
+20 state 1
+21 state 1
+22 state 1
+23 state 1
+24 state 1
+25 state 1
+26 state 1
+27 state 1
+28 init 1 4 2
+29 init 1 5 2
+30 init 1 6 2
+31 init 1 7 2
+32 init 1 8 3
+33 init 1 9 3
+34 init 1 10 3
+35 init 1 11 3
+36 init 1 12 2
+37 init 1 13 2
+38 init 1 14 2
+39 init 1 15 3
+40 init 1 16 3
+41 init 1 17 3
+42 init 1 18 3
+43 init 1 19 3
+44 init 1 20 3
+45 init 1 21 3
+46 init 1 22 2
+47 init 1 23 3
+48 init 1 24 3
+49 init 1 25 2
+50 init 1 26 3
+51 init 1 27 3
+52 input 1
+53 input 1
+54 input 1
+55 input 1
+56 input 1
+57 input 1
+58 input 1
+59 input 1
+60 input 1
+61 input 1
+62 input 1
+63 input 1
+64 nand 1 52 53
+65 constraint 64
+66 nand 1 52 58
+67 constraint 66
+68 nand 1 52 59
+69 constraint 68
+70 nand 1 52 60
+71 constraint 70
+72 nand 1 52 62
+73 constraint 72
+74 nand 1 53 58
+75 constraint 74
+76 nand 1 53 59
+77 constraint 76
+78 nand 1 53 60
+79 constraint 78
+80 nand 1 53 62
+81 constraint 80
+82 nand 1 58 59
+83 constraint 82
+84 nand 1 58 60
+85 constraint 84
+86 nand 1 58 62
+87 constraint 86
+88 nand 1 59 60
+89 constraint 88
+90 nand 1 59 62
+91 constraint 90
+92 nand 1 60 62
+93 constraint 92
+94 nand 1 54 55
+95 constraint 94
+96 nand 1 54 58
+97 constraint 96
+98 nand 1 54 60
+99 constraint 98
+100 nand 1 54 61
+101 constraint 100
+102 nand 1 54 63
+103 constraint 102
+104 nand 1 55 58
+105 constraint 104
+106 nand 1 55 60
+107 constraint 106
+108 nand 1 55 61
+109 constraint 108
+110 nand 1 55 63
+111 constraint 110
+112 nand 1 58 60
+113 constraint 112
+114 nand 1 58 61
+115 constraint 114
+116 nand 1 58 63
+117 constraint 116
+118 nand 1 60 61
+119 constraint 118
+120 nand 1 60 63
+121 constraint 120
+122 nand 1 61 63
+123 constraint 122
+124 nand 1 56 57
+125 constraint 124
+126 nand 1 56 59
+127 constraint 126
+128 nand 1 56 61
+129 constraint 128
+130 nand 1 56 62
+131 constraint 130
+132 nand 1 56 63
+133 constraint 132
+134 nand 1 57 59
+135 constraint 134
+136 nand 1 57 61
+137 constraint 136
+138 nand 1 57 62
+139 constraint 138
+140 nand 1 57 63
+141 constraint 140
+142 nand 1 59 61
+143 constraint 142
+144 nand 1 59 62
+145 constraint 144
+146 nand 1 59 63
+147 constraint 146
+148 nand 1 61 62
+149 constraint 148
+150 nand 1 61 63
+151 constraint 150
+152 nand 1 62 63
+153 constraint 152
+154 xor 1 4 5
+155 ite 1 58 154 4
+156 xor 1 4 6
+157 ite 1 59 156 155
+158 xor 1 4 7
+159 ite 1 52 158 157
+160 ite 1 53 7 159
+161 xor 1 7 8
+162 ite 1 60 161 7
+163 xor 1 7 9
+164 ite 1 62 163 162
+165 ite 1 53 4 164
+166 xor 1 5 4
+167 ite 1 60 166 5
+168 xor 1 5 6
+169 ite 1 61 168 167
+170 xor 1 5 8
+171 ite 1 54 170 169
+172 ite 1 55 8 171
+173 xor 1 8 7
+174 ite 1 58 173 8
+175 xor 1 8 9
+176 ite 1 63 175 174
+177 ite 1 55 5 176
+178 xor 1 6 4
+179 ite 1 62 178 6
+180 xor 1 6 5
+181 ite 1 63 180 179
+182 xor 1 6 9
+183 ite 1 56 182 181
+184 ite 1 57 9 183
+185 xor 1 9 7
+186 ite 1 59 185 9
+187 xor 1 9 8
+188 ite 1 61 187 186
+189 ite 1 57 6 188
+190 xor 1 10 11
+191 ite 1 58 190 10
+192 xor 1 10 12
+193 ite 1 59 192 191
+194 xor 1 10 13
+195 ite 1 52 194 193
+196 ite 1 53 13 195
+197 xor 1 13 14
+198 ite 1 60 197 13
+199 xor 1 13 15
+200 ite 1 62 199 198
+201 ite 1 53 10 200
+202 xor 1 11 10
+203 ite 1 60 202 11
+204 xor 1 11 12
+205 ite 1 61 204 203
+206 xor 1 11 14
+207 ite 1 54 206 205
+208 ite 1 55 14 207
+209 xor 1 14 13
+210 ite 1 58 209 14
+211 xor 1 14 15
+212 ite 1 63 211 210
+213 ite 1 55 11 212
+214 xor 1 12 10
+215 ite 1 62 214 12
+216 xor 1 12 11
+217 ite 1 63 216 215
+218 xor 1 12 15
+219 ite 1 56 218 217
+220 ite 1 57 15 219
+221 xor 1 15 13
+222 ite 1 59 221 15
+223 xor 1 15 14
+224 ite 1 61 223 222
+225 ite 1 57 12 224
+226 xor 1 16 17
+227 ite 1 58 226 16
+228 xor 1 16 18
+229 ite 1 59 228 227
+230 xor 1 16 19
+231 ite 1 52 230 229
+232 ite 1 53 19 231
+233 xor 1 19 20
+234 ite 1 60 233 19
+235 xor 1 19 21
+236 ite 1 62 235 234
+237 ite 1 53 16 236
+238 xor 1 17 16
+239 ite 1 60 238 17
+240 xor 1 17 18
+241 ite 1 61 240 239
+242 xor 1 17 20
+243 ite 1 54 242 241
+244 ite 1 55 20 243
+245 xor 1 20 19
+246 ite 1 58 245 20
+247 xor 1 20 21
+248 ite 1 63 247 246
+249 ite 1 55 17 248
+250 xor 1 18 16
+251 ite 1 62 250 18
+252 xor 1 18 17
+253 ite 1 63 252 251
+254 xor 1 18 21
+255 ite 1 56 254 253
+256 ite 1 57 21 255
+257 xor 1 21 19
+258 ite 1 59 257 21
+259 xor 1 21 20
+260 ite 1 61 259 258
+261 ite 1 57 18 260
+262 xor 1 22 23
+263 ite 1 58 262 22
+264 xor 1 22 24
+265 ite 1 59 264 263
+266 xor 1 22 25
+267 ite 1 52 266 265
+268 ite 1 53 25 267
+269 xor 1 25 26
+270 ite 1 60 269 25
+271 xor 1 25 27
+272 ite 1 62 271 270
+273 ite 1 53 22 272
+274 xor 1 23 22
+275 ite 1 60 274 23
+276 xor 1 23 24
+277 ite 1 61 276 275
+278 xor 1 23 26
+279 ite 1 54 278 277
+280 ite 1 55 26 279
+281 xor 1 26 25
+282 ite 1 58 281 26
+283 xor 1 26 27
+284 ite 1 63 283 282
+285 ite 1 55 23 284
+286 xor 1 24 22
+287 ite 1 62 286 24
+288 xor 1 24 23
+289 ite 1 63 288 287
+290 xor 1 24 27
+291 ite 1 56 290 289
+292 ite 1 57 27 291
+293 xor 1 27 25
+294 ite 1 59 293 27
+295 xor 1 27 26
+296 ite 1 61 295 294
+297 ite 1 57 24 296
+298 or 1 4 5
+299 or 1 298 6
+300 nand 1 4 5
+301 nand 1 4 6
+302 nand 1 5 6
+303 and 1 300 301
+304 and 1 303 302
+305 and 1 299 304
+306 not 1 7
+307 not 1 8
+308 not 1 9
+309 and 1 306 307
+310 and 1 309 308
+311 and 1 305 310
+312 or 1 10 11
+313 or 1 312 12
+314 nand 1 10 11
+315 nand 1 10 12
+316 nand 1 11 12
+317 and 1 314 315
+318 and 1 317 316
+319 and 1 313 318
+320 not 1 13
+321 not 1 14
+322 not 1 15
+323 and 1 320 321
+324 and 1 323 322
+325 and 1 319 324
+326 or 1 16 17
+327 or 1 326 18
+328 nand 1 16 17
+329 nand 1 16 18
+330 nand 1 17 18
+331 and 1 328 329
+332 and 1 331 330
+333 and 1 327 332
+334 not 1 19
+335 not 1 20
+336 not 1 21
+337 and 1 334 335
+338 and 1 337 336
+339 and 1 333 338
+340 or 1 22 23
+341 or 1 340 24
+342 nand 1 22 23
+343 nand 1 22 24
+344 nand 1 23 24
+345 and 1 342 343
+346 and 1 345 344
+347 and 1 341 346
+348 not 1 25
+349 not 1 26
+350 not 1 27
+351 and 1 348 349
+352 and 1 351 350
+353 and 1 347 352
+354 state 1
+355 init 1 354 2
+356 or 1 311 354
+357 state 1
+358 init 1 357 2
+359 and 1 325 354
+360 or 1 359 357
+361 state 1
+362 init 1 361 2
+363 and 1 339 357
+364 or 1 363 361
+365 state 1
+366 init 1 365 2
+367 or 1 353 365
+368 and 1 364 367
+369 bad 368
+370 next 1 354 356
+371 next 1 4 160
+372 next 1 5 172
+373 next 1 6 184
+374 next 1 7 165
+375 next 1 8 177
+376 next 1 9 189
+377 next 1 357 360
+378 next 1 10 196
+379 next 1 11 208
+380 next 1 12 220
+381 next 1 13 201
+382 next 1 14 213
+383 next 1 15 225
+384 next 1 361 364
+385 next 1 16 232
+386 next 1 17 244
+387 next 1 18 256
+388 next 1 19 237
+389 next 1 20 249
+390 next 1 21 261
+391 next 1 365 367
+392 next 1 22 268
+393 next 1 23 280
+394 next 1 24 292
+395 next 1 25 273
+396 next 1 26 285
+397 next 1 27 297
